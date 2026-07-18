@@ -1,0 +1,89 @@
+"""Ports implemented by infrastructure adapters.
+
+The application layer depends only on these protocols. OCR, embeddings, data
+stores, and pricing providers can therefore be replaced independently.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from typing import Protocol
+
+from app.domain.models import Card, NormalizedCardImage, OcrReading, Price
+
+
+class ImageValidator(Protocol):
+    """Validate an untrusted upload before expensive processing."""
+
+    def validate(self, payload: bytes, declared_mime: str) -> bytes:
+        """Return a safe canonical image payload or raise a domain error."""
+        ...
+
+
+class CardLocator(Protocol):
+    """Locate, orient, and perspective-correct exactly one card."""
+
+    def normalize(self, payload: bytes) -> NormalizedCardImage:
+        """Return a single normalized card with specialized regions."""
+        ...
+
+
+class OcrEngine(Protocol):
+    """Read card name and collector number from their dedicated regions."""
+
+    def read_name(self, region_jpeg: bytes) -> OcrReading:
+        """Read only the upper name region."""
+        ...
+
+    def read_collector_number(self, region_jpeg: bytes) -> OcrReading:
+        """Read only the lower collector-number region."""
+        ...
+
+
+class CardRepository(Protocol):
+    """Search the local catalog without scanning every reference image."""
+
+    async def search(
+        self,
+        *,
+        normalized_name: str | None,
+        collector_number: str | None,
+        limit: int,
+    ) -> Sequence[Card]:
+        """Return a small candidate set using indexed text fields."""
+        ...
+
+    async def get(self, card_id: str) -> Card | None:
+        """Return one catalog card by internal identifier."""
+        ...
+
+
+class ArtworkMatcher(Protocol):
+    """Compare a scan embedding with stored candidate embeddings."""
+
+    def score(self, artwork_jpeg: bytes, card: Card) -> float:
+        """Return cosine-derived similarity in the closed interval [0, 1]."""
+        ...
+
+
+class PriceProvider(Protocol):
+    """Provide cached pricing without making recognition depend on a marketplace."""
+
+    async def get_price(self, card: Card) -> Price:
+        """Return the freshest locally available price, including a null value."""
+        ...
+
+
+class FeedbackRepository(Protocol):
+    """Persist explicit user feedback without retaining the uploaded image."""
+
+    async def record(
+        self,
+        *,
+        recognition_id: str,
+        predicted_card_id: str | None,
+        correct_card_id: str | None,
+        is_correct: bool,
+    ) -> None:
+        """Store one feedback event containing identifiers only."""
+        ...

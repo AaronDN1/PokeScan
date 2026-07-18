@@ -1,0 +1,62 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "5173:5173"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  api:
+    build:
+      context: ./backend
+    environment:
+      POKELENS_ENVIRONMENT: development
+      POKELENS_DATABASE_URL: postgresql+asyncpg://pokelens:pokelens@postgres:5432/pokelens
+      POKELENS_REDIS_URL: redis://redis:6379/0
+      POKELENS_CORS_ORIGINS: '["http://localhost:5173"]'
+      POKELENS_AUTO_CREATE_SCHEMA: "true"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/models:/app/models:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: pokelens
+      POSTGRES_USER: pokelens
+      POSTGRES_PASSWORD: pokelens
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pokelens -d pokelens"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres-data:
