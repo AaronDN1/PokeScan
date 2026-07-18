@@ -19,10 +19,27 @@ test("ships the focused scanner experience without starter metadata", async () =
   assert.match(scanner, /Take photo|UploadPanel/);
   assert.match(scanner, /Scanner ready/);
   assert.match(scanner, /Scanner offline/);
+  assert.match(scanner, /Scanner setup needed/);
+  assert.match(scanner, /mutation\.data\.status === "matched"/);
+  assert.match(scanner, /mutation\.data\.status !== "matched"/);
+  assert.match(scanner, /mutation\.isPending/);
+  assert.match(scanner, /mutation\.isError/);
   assert.match(scanner, /disabled=\{!scannerReady\}/);
   assert.match(manifest, /standalone/);
   assert.match(packageJson, /@tanstack\/react-query/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
+});
+
+test("renders optional pricing and marketplace data honestly", async () => {
+  const [contracts, resultCard, candidates] = await Promise.all([
+    readFile(new URL("lib/contracts.ts", root), "utf8"),
+    readFile(new URL("components/scanner/result-card.tsx", root), "utf8"),
+    readFile(new URL("components/scanner/candidate-list.tsx", root), "utf8"),
+  ]);
+  assert.match(contracts, /price_status/);
+  assert.match(contracts, /marketplace_url: z\.string\(\)\.url\(\)\.nullable\(\)/);
+  assert.match(resultCard, /card\.marketplace_url \?/);
+  assert.match(candidates, /card\.marketplace_url \?/);
 });
 
 test("does not retain uploaded card images in browser storage", async () => {

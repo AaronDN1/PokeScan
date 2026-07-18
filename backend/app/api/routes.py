@@ -4,17 +4,21 @@ from __future__ import annotations
 
 from typing import Annotated, cast
 
-from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile, status
-from sqlalchemy import text
+from fastapi import APIRouter, File, HTTPException, Query, Request, Response, UploadFile, status
+from sqlalchemy import func, select, text
 
 from app.api.schemas import (
     CardResponse,
+    CatalogCapability,
     FeedbackRequest,
+    HealthCapabilities,
     HealthResponse,
     PriceResponse,
+    PricingCapability,
     RecognitionResponse,
 )
 from app.core.container import Container
+from app.infrastructure.database.models import PriceRecord
 
 router = APIRouter()
 
@@ -27,6 +31,9 @@ def _container(request: Request) -> Container:
 async def recognize_card(
     request: Request,
     image: Annotated[UploadFile, File(description="One clear photo containing one Pokémon card")],
+    debug: Annotated[
+        bool, Query(description="Include development-only recognition diagnostics")
+    ] = False,
 ) -> RecognitionResponse:
     """Identify exactly one uploaded card and delete request bytes after processing."""
     container = _container(request)
@@ -41,6 +48,11 @@ async def recognize_card(
         result = await container.recognize_card.execute(
             payload=payload,
             declared_mime=image.content_type or "application/octet-stream",
+            include_diagnostics=(
+                debug
+                and container.settings.environment == "development"
+                and container.settings.development_diagnostics
+            ),
         )
         return RecognitionResponse.from_domain(result)
     finally:
@@ -83,26 +95,49 @@ async def submit_feedback(feedback: FeedbackRequest, request: Request) -> Respon
 
 @router.get("/health", response_model=HealthResponse)
 async def health(request: Request) -> HealthResponse:
-    """Report API, database, and model-artifact readiness."""
+    """Report independent recognition, catalog, and pricing capabilities."""
     container = _container(request)
     database_status = "ready"
+    priced_card_count = 0
     try:
         async with container.sessions() as session:
             await session.execute(text("SELECT 1"))
+            priced_card_count = int(
+                await session.scalar(select(func.count(PriceRecord.card_id))) or 0
+            )
     except Exception:
         database_status = "unavailable"
     settings = container.settings
-    models_ready = all(
-        path.is_file()
-        for path in (
-            settings.name_ocr_model_path,
-            settings.number_ocr_model_path,
-            settings.artwork_model_path,
-        )
-    )
+    ocr_ready = container.ocr_backend != "unavailable"
+    artwork_ready = bool(getattr(container.artwork, "available", False))
+    catalog_ready = database_status == "ready" and container.catalog_count > 0
+    recognition_ready = ocr_ready and artwork_ready and catalog_ready
+    issues = list(dict.fromkeys(container.component_errors.values()))
+    if not catalog_ready and database_status == "ready":
+        issues.append("The local card catalog is empty. Run the development bootstrap.")
     return HealthResponse(
-        status="ready" if database_status == "ready" else "degraded",
+        status="ready" if recognition_ready else "degraded",
         version=settings.api_version,
         database=database_status,
-        models="ready" if models_ready else "artifacts_required",
+        recognition_ready=recognition_ready,
+        capabilities=HealthCapabilities(
+            card_localization={"ready": True, "backend": "opencv"},
+            ocr={"ready": ocr_ready, "backend": container.ocr_backend},
+            artwork_matching={
+                "ready": artwork_ready,
+                "backend": container.artwork_backend,
+            },
+            catalog=CatalogCapability(
+                ready=catalog_ready,
+                card_count=container.catalog_count,
+                source="tcgdex",
+            ),
+            pricing=PricingCapability(
+                ready=database_status == "ready",
+                priced_card_count=priced_card_count,
+                mode="cached_optional",
+            ),
+            custom_onnx_models=container.settings.custom_onnx_models_required,
+        ),
+        issues=issues,
     )

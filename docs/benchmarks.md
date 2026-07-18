@@ -1,42 +1,12 @@
-# Benchmarks and model promotion
+# Benchmarks
 
-Accuracy must be measurable before model artifacts serve traffic. Dataset files live outside Git; manifests and aggregate reports are versioned.
+No production accuracy or latency claim is made for this pretrained baseline without representative evidence.
 
-## Dataset slices
+Copy `backend/benchmarks/manifest.example.json` to `manifest.json`, add licensed/consented real photographs under `backend/benchmarks/photos/`, and map each file to an exact imported card ID. Include modern/vintage layouts, repeated names/artwork, sleeves, glare, rotations, perspective, device compression, and unusable negatives.
 
-The held-out benchmark must contain licensed, consented real photographs across:
+```bash
+cd backend
+python scripts/benchmark_recognition.py --manifest benchmarks/manifest.json --output benchmarks/results.json
+```
 
-- modern and vintage layouts;
-- standard, full-art, rainbow, gold, and holographic treatments;
-- sleeves and unsleeved cards;
-- controlled, dim, warm, and mixed light;
-- perspective, rotation, partial shadow, and realistic device compression;
-- confusing reprints with the same name/artwork but different set or number;
-- non-card images, multiple cards, blur, glare, and partial-card negatives.
-
-Do not split multiple photos of one physical card across training and held-out sets.
-
-## Required metrics
-
-- exact card top-1 accuracy;
-- top-3 recall for ambiguous results;
-- false-confident rate (wrong result returned as `matched`);
-- correct rejection rate for negatives and unusable images;
-- localization success and corner error;
-- OCR exact name and exact collector-number rates;
-- p50, p95, and p99 end-to-end CPU latency;
-- results by every capture-condition slice.
-
-## Initial promotion gates
-
-- false-confident rate ≤ 0.2%;
-- exact top-1 ≥ 97% on recognized, usable single-card photos;
-- unusable-image rejection ≥ 95%;
-- p95 server recognition ≤ 1.0 s on the declared production CPU;
-- no critical slice more than five percentage points below aggregate accuracy.
-
-These are product gates, not claims about the untrained repository checkout.
-
-## Report metadata
-
-Every report records Git commit, model semantic version and SHA-256, dataset manifest digest, catalog snapshot, hardware, ONNX Runtime version, confidence thresholds, raw confusion counts, and slice tables. Threshold changes require the same review as model changes.
+The runner uses the real composition root and reports sample count, localization success, exact name and collector OCR accuracy, top-1/top-3 exact-card accuracy, false-confident match rate, ambiguous/unrecognized rates, median latency, and p95 latency. Keep hardware, Git commit, catalog snapshot, dependency versions, and threshold configuration with promoted reports. Do not tune and evaluate on the same photographs.

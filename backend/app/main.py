@@ -16,7 +16,7 @@ from app.api.routes import router
 from app.core.config import get_settings
 from app.core.container import Container
 from app.core.logging import configure_logging
-from app.domain.errors import RecognitionError
+from app.domain.errors import RecognitionError, RecognitionUnavailableError
 
 settings = get_settings()
 configure_logging(development=settings.environment == "development")
@@ -83,6 +83,6 @@ async def request_context(
 async def recognition_error_handler(_request: Request, error: RecognitionError) -> JSONResponse:
     """Translate expected domain errors without exposing raw exceptions."""
     return JSONResponse(
-        status_code=422,
+        status_code=503 if isinstance(error, RecognitionUnavailableError) else 422,
         content={"detail": str(error), "code": error.code},
     )

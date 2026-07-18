@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+**/.venv/
 /.pnpm-store/
 /.pnp
 .pnp.*
@@ -14,6 +15,7 @@
 # testing
 /coverage
 /.devserver*.log
+/.local-app*.log
 /.preview*.log
 /tsconfig.tsbuildinfo
 **/.mypy_cache/
@@ -44,7 +46,12 @@ yarn-error.log*
 
 # local backend database and model artifacts
 /backend/*.db
+/backend/data/**
+!/backend/data/.gitkeep
+/backend/benchmarks/photos/**
+!/backend/benchmarks/photos/.gitkeep
 /backend/.test-deps/
+/backend/.test-venv/
 /backend/models/*.onnx
 /backend/models/*.pt
 /backend/models/*.pth

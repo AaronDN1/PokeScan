@@ -9,7 +9,14 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Protocol
 
-from app.domain.models import Card, NormalizedCardImage, OcrReading, Price
+from app.domain.models import (
+    ArtworkEvidence,
+    Card,
+    NormalizedCardImage,
+    OcrReading,
+    OrientationResult,
+    Price,
+)
 
 
 class ImageValidator(Protocol):
@@ -40,6 +47,13 @@ class OcrEngine(Protocol):
         ...
 
 
+class OrientationResolver(Protocol):
+    """Choose the upright normalized card while reusing OCR observations."""
+
+    def resolve(self, image: NormalizedCardImage) -> OrientationResult:
+        """Evaluate supported rotations and return one selected orientation."""
+        ...
+
 class CardRepository(Protocol):
     """Search the local catalog without scanning every reference image."""
 
@@ -48,9 +62,15 @@ class CardRepository(Protocol):
         *,
         normalized_name: str | None,
         collector_number: str | None,
+        name_alternatives: tuple[str, ...] = (),
+        collector_alternatives: tuple[str, ...] = (),
         limit: int,
     ) -> Sequence[Card]:
         """Return a small candidate set using indexed text fields."""
+        ...
+
+    async def count(self) -> int:
+        """Return the number of imported language-specific card printings."""
         ...
 
     async def get(self, card_id: str) -> Card | None:
@@ -63,6 +83,12 @@ class ArtworkMatcher(Protocol):
 
     def score(self, artwork_jpeg: bytes, card: Card) -> float:
         """Return cosine-derived similarity in the closed interval [0, 1]."""
+        ...
+
+    def score_many(
+        self, artwork_jpeg: bytes, cards: Sequence[Card]
+    ) -> dict[str, ArtworkEvidence]:
+        """Compute scan features once and score a bounded candidate sequence."""
         ...
 
 

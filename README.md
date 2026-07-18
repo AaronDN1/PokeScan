@@ -1,64 +1,91 @@
 # PokéLens
 
-PokéLens is a mobile-first PWA for identifying one Pokémon card from one clear photograph. It is deliberately focused on the shortest trustworthy flow: upload, recognize, verify, price, and scan again.
+PokéLens identifies one English Pokémon card from one clear front-side photograph. The default baseline is fully local at recognition time: OpenCV locates and warps the card, pretrained PP-OCRv6 reads targeted text regions, a normalized TCGdex catalog retrieves candidates, and pHash + ORB + pretrained MobileNetV2 features verify the printing.
 
-This repository is a production-oriented foundation rather than a fake model demo. The upload, localization, perspective correction, region extraction, candidate search, artwork verification, confidence, pricing cache, and public API are implemented. Licensed catalog data and trained model binaries are deployment artifacts and are not fabricated or committed; until they are supplied, health checks report `artifacts_required` and recognition fails safely instead of returning a made-up card.
+The project does not require custom-trained models. The original custom ONNX adapters remain available for future use.
 
-## What is included
+## What was “scanner offline”
 
-- Next.js App Router PWA with TypeScript, Tailwind CSS, shadcn-style primitives, TanStack Query, Zod, camera capture, and responsive result states.
-- FastAPI service with clean domain/application/infrastructure boundaries.
-- Deterministic Pillow/OpenCV image validation, card localization, perspective correction, and fixed OCR/artwork regions.
-- Replaceable CTC OCR and artwork-embedding adapters using ONNX Runtime.
-- Indexed SQLAlchemy catalog search for PostgreSQL, SQLite development fallback, cached pricing, and opt-in correction feedback without image retention.
-- Redis-backed rate limiting with a safe process-local development fallback.
-- PyTorch artwork embedding model and ONNX export contract.
-- Docker Compose, CI, unit/integration tests, benchmark policy, and deployment documentation.
+The hosted `.chatgpt.site` was the web frontend only. A browser cannot run this FastAPI/SQLite/OpenCV/ONNX backend, and the old health contract disabled the upload button when three uncommitted custom model files were absent. Copying `.env.example` only created a local configuration file; it did not install, initialize, or start the API.
 
-## Quick start
+`pnpm` is the package manager declared by this repository and used by CI. `npm install` can install the frontend dependencies, but use pnpm for reproducible lockfile behavior. The Python package lives in `backend/`, which is why running `pip install -e ".[dev]"` from the repository root reported that no `pyproject.toml` existed.
 
-Prerequisites: Node.js 22+, pnpm 11+, Python 3.12+, and Docker if you want PostgreSQL and Redis.
+## Working local setup (Windows PowerShell)
 
-```bash
-pnpm install
-cp .env.example .env.local
-pnpm dev
+Prerequisites: Node.js 22+, pnpm 11+, and Python 3.12+.
+
+From the repository root, these are the only commands required:
+
+```powershell
+pnpm.cmd --version
+pnpm.cmd install
+pnpm.cmd setup
+pnpm.cmd dev
 ```
 
-In another terminal:
+The repository expects pnpm 11.9.0. If `pnpm.cmd --version` says the command is missing,
+install it for your Windows user without enabling Corepack system-wide:
 
-```bash
-cd backend
-python -m venv .venv
-# PowerShell: .venv\Scripts\Activate.ps1
-# macOS/Linux: source .venv/bin/activate
-pip install -e ".[dev]"
-cp .env.example .env
-uvicorn app.main:app --reload
+```powershell
+npm.cmd install --global pnpm@11.9.0
 ```
 
-The PWA runs at `http://localhost:5173`, the API at `http://localhost:8000`, and interactive API docs at `http://localhost:8000/docs` outside production.
+`corepack enable` is optional and commonly requires an Administrator terminal when
+Node.js is installed under `C:\Program Files\nodejs`; it is not required to run this project.
 
-To run infrastructure and both services together:
+`pnpm.cmd setup` creates the Python environment, installs the recognition
+dependencies, downloads the pretrained models, and prepares a real 250-card
+starter catalog. Run it once. For the complete English catalog instead, use:
 
-```bash
-docker compose up --build
+```powershell
+pnpm.cmd setup:full
 ```
 
-## Required production data
+`pnpm.cmd dev` starts both the recognition API and the web app in one terminal.
+It reuses an already-healthy PokéLens API instead of failing when port 8000 is
+occupied. Stop it with `Ctrl+C`.
 
-1. Place versioned ONNX artifacts described in [`backend/models/README.md`](backend/models/README.md).
-2. Prepare a licensed normalized catalog export and import it with:
+Open `http://localhost:5173`. The API is at `http://localhost:8000`, health at
+`http://localhost:8000/health`, and development API docs at
+`http://localhost:8000/docs`.
 
-   ```bash
-   cd backend
-   python scripts/import_catalog.py path/to/catalog.json
-   ```
+macOS/Linux uses `pnpm` instead of `pnpm.cmd`; the setup launcher creates the
+platform-appropriate virtual environment.
 
-3. Populate cached prices asynchronously. Recognition reads the cache and never waits on TCGplayer.
-4. Run and pass the benchmark promotion gates before enabling production traffic.
+## Explicit full catalog pipeline
 
-## Verification
+Run from `backend/` with the environment activated:
+
+```bash
+python scripts/download_pretrained_models.py
+python scripts/build_catalog.py --language en --output data/catalog-en.json
+python scripts/prepare_catalog_assets.py data/catalog-en.json
+python scripts/import_catalog.py data/catalog-en.json
+```
+
+The builder uses TCGdex v2 structured data and its documented high-resolution WebP assets. IDs include source, language, set, and source card identity. Isolated missing metadata/images are recorded or skipped; recognition never downloads catalog images or calls a marketplace.
+
+## Configuration
+
+Frontend:
+
+```env
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+```
+
+Backend defaults (all may also use the `POKELENS_` prefix):
+
+```env
+OCR_BACKEND=paddle
+ARTWORK_MATCHER_BACKEND=composite
+CUSTOM_ONNX_MODELS_REQUIRED=false
+POKELENS_DATABASE_URL=sqlite+aiosqlite:///./data/pokelens.db
+POKELENS_CORS_ORIGINS=["http://localhost:5173"]
+```
+
+Future custom adapters remain selectable with `OCR_BACKEND=onnx_ctc`, `ARTWORK_MATCHER_BACKEND=onnx_embedding`, and `CUSTOM_ONNX_MODELS_REQUIRED=true` after supplying the documented custom files.
+
+## Verification and benchmarks
 
 ```bash
 pnpm typecheck
@@ -66,19 +93,36 @@ pnpm test
 pnpm build
 
 cd backend
-pytest
 ruff check .
 mypy app
+pytest
+python scripts/smoke_recognition.py path/to/one-real-card-photo.jpg
+python scripts/benchmark_recognition.py --manifest benchmarks/manifest.json --output benchmarks/results.json
 ```
 
-## Documentation
+Copy `backend/benchmarks/manifest.example.json` to `manifest.json`, place consented photographs in `backend/benchmarks/photos/`, and replace each expected ID with the imported TCGdex internal ID. No accuracy claim is made until a representative benchmark has been run.
 
-- [Architecture](docs/architecture.md)
-- [Recognition pipeline](docs/recognition-pipeline.md)
-- [API contracts](docs/api.md)
-- [Database schema](docs/database.md)
-- [Benchmarks and model promotion](docs/benchmarks.md)
-- [Deployment and operations](docs/deployment.md)
-- [Security and privacy](docs/security.md)
+## Docker
 
-Pokémon and related marks belong to their respective owners. This project is not affiliated with or endorsed by Nintendo, Creatures, GAME FREAK, The Pokémon Company, or TCGplayer.
+The backend image explicitly installs the pinned runtimes and downloads pretrained models during its build. Catalog preparation remains an explicit setup operation:
+
+```bash
+docker compose build
+docker compose --profile setup run --rm setup
+docker compose up
+```
+
+For a bounded Docker smoke catalog, override the setup command with `python scripts/bootstrap_dev.py --limit 250 --rebuild-catalog`.
+
+## Supported scope and limitations
+
+- One fully visible, front-side English card per image.
+- Modern layouts are the initial optimization target; many vintage cards work, but tiny collector numbers are harder.
+- Moderate rotation/perspective and ordinary sleeves may work; glare, strong blur, occlusion, severe foreshortening, and unusual layouts reduce reliability.
+- Missing pricing or marketplace mappings do not affect recognition.
+- Baseline thresholds are conservative engineering defaults, not scientifically calibrated accuracy claims.
+- CPU latency varies materially by hardware; benchmark on the intended deployment CPU.
+
+See [architecture](docs/architecture.md), [pipeline](docs/recognition-pipeline.md), [API](docs/api.md), [database](docs/database.md), [benchmarks](docs/benchmarks.md), [deployment](docs/deployment.md), and [security](docs/security.md).
+
+Pokémon and related marks belong to their respective owners. This project is not affiliated with or endorsed by Nintendo, Creatures, GAME FREAK, The Pokémon Company, TCGdex, or TCGplayer.

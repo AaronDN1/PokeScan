@@ -5,6 +5,7 @@ export const priceSchema = z.object({
   currency: z.string().default("USD"),
   source: z.string().nullable(),
   updated_at: z.string().nullable(),
+  price_status: z.enum(["available", "unavailable"]),
 });
 
 export const cardSchema = z.object({
@@ -16,7 +17,7 @@ export const cardSchema = z.object({
   rarity: z.string().nullable(),
   language: z.string(),
   image_url: z.string().url(),
-  marketplace_url: z.string().url(),
+  marketplace_url: z.string().url().nullable(),
   price: priceSchema,
 });
 
@@ -33,13 +34,31 @@ export const recognitionResponseSchema = z.object({
   candidates: z.array(candidateSchema).default([]),
   processing_ms: z.number().nonnegative(),
   message: z.string().nullable(),
+  diagnostics: z.record(z.unknown()).nullable().optional(),
 });
 
 export const healthResponseSchema = z.object({
   status: z.enum(["ready", "degraded"]),
   version: z.string(),
   database: z.enum(["ready", "unavailable"]),
-  models: z.enum(["ready", "artifacts_required"]),
+  recognition_ready: z.boolean(),
+  capabilities: z.object({
+    card_localization: z.object({ ready: z.boolean(), backend: z.string() }).passthrough(),
+    ocr: z.object({ ready: z.boolean(), backend: z.string() }).passthrough(),
+    artwork_matching: z.object({ ready: z.boolean(), backend: z.string() }).passthrough(),
+    catalog: z.object({
+      ready: z.boolean(),
+      card_count: z.number().int().nonnegative(),
+      source: z.string(),
+    }),
+    pricing: z.object({
+      ready: z.boolean(),
+      priced_card_count: z.number().int().nonnegative(),
+      mode: z.string(),
+    }),
+    custom_onnx_models: z.boolean(),
+  }),
+  issues: z.array(z.string()),
 });
 
 export type Card = z.infer<typeof cardSchema>;

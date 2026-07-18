@@ -1,43 +1,30 @@
 # Deployment and operations
 
-## Services
+Deploy the web frontend and FastAPI backend separately. The `.chatgpt.site`/Sites project is a frontend host; it does not run the Python recognition service.
 
-- `web`: stateless Next.js/Vinext PWA.
-- `api`: stateless FastAPI workers with process-scoped ONNX sessions.
-- `postgres`: normalized catalog, price cache, feedback.
-- `redis`: distributed recognition rate limit.
-- scheduled catalog/price workers: separate deployables, not request handlers.
+## Frontend
 
-Docker Compose mirrors these boundaries for development. Production should use managed PostgreSQL/Redis, an HTTPS ingress, health probes, autoscaling, and a read-only model volume or immutable image layer.
+Build with `NEXT_PUBLIC_API_BASE_URL=https://your-api.example`. The output is compatible with the existing Sites/Vinext host and can also be adapted for Vercel-compatible frontend hosting. The URL must be absolute HTTP(S); missing/invalid configuration produces a useful offline message.
 
-## Required environment
+## Backend
 
-Frontend:
+The backend Docker image is suitable for Cloud Run, Render, Railway, Azure Container Apps, or another container service with persistent PostgreSQL/catalog data. It runs non-root, initializes OCR and MobileNet sessions once per worker, and exposes `/health`.
 
-- `NEXT_PUBLIC_API_URL`: public HTTPS API origin.
+Required or common variables:
 
-Backend variables use the `POKELENS_` prefix:
+```env
+POKELENS_ENVIRONMENT=production
+POKELENS_DATABASE_URL=postgresql+asyncpg://...
+POKELENS_REDIS_URL=redis://...
+POKELENS_CORS_ORIGINS=["https://your-frontend.example"]
+OCR_BACKEND=paddle
+ARTWORK_MATCHER_BACKEND=composite
+CUSTOM_ONNX_MODELS_REQUIRED=false
+POKELENS_AUTO_CREATE_SCHEMA=false
+```
 
-- `DATABASE_URL`: async SQLAlchemy PostgreSQL URL.
-- `REDIS_URL`: Redis URL.
-- `CORS_ORIGINS`: JSON array of allowed web origins.
-- `NAME_OCR_MODEL_PATH`, `NUMBER_OCR_MODEL_PATH`, `ARTWORK_MODEL_PATH`.
-- `AUTO_CREATE_SCHEMA=false` after production migrations are adopted.
+Run catalog/reference preparation before serving traffic and persist `data/` or import into PostgreSQL. The container image downloads pinned pretrained model assets during its explicit build, never during a scan request.
 
-No marketplace key is required on the recognition path. Price refresh workers own those credentials.
+Release order: build the image, run catalog setup/import, deploy the API, verify `recognition_ready=true`, build the web app with the public API URL, then execute real-card and error-case smoke tests. Pricing can remain empty. Scale cautiously because each API worker holds its own CPU model sessions; benchmark worker count and p95 on the chosen instance.
 
-## Release order
-
-1. Apply a reviewed database migration.
-2. Import and validate the catalog snapshot and embeddings.
-3. Deploy the API with benchmark-approved model artifacts.
-4. Verify `/health` reports database and models ready.
-5. Deploy the PWA with its API origin.
-6. Run single-card smoke scans and error cases.
-7. Shift traffic gradually while watching false-confidence feedback and p95 latency.
-
-## Observability
-
-Alert on API 5xx rate, recognition 422 mix changes, Redis/database readiness, model-load failures, p95/p99 latency, price-cache age, rate-limit volume, and feedback indicating incorrect confident matches. Timings should be split into validation, localization, OCR, retrieval, artwork verification, pricing cache, and total.
-
-Uploaded images are never acceptable observability payloads.
+This repository was prepared for deployment but was not deployed by Codex because no backend cloud credentials/target were supplied.

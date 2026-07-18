@@ -33,12 +33,19 @@ class Card:
     name: str
     normalized_name: str
     collector_number: str
+    normalized_collector_number: str
     printed_total: str | None
+    source: str
+    source_card_id: str
+    set_id: str
     set_name: str
     rarity: str | None
     language: str
     image_url: str
-    marketplace_url: str
+    marketplace_url: str | None = None
+    reference_asset: str | None = None
+    perceptual_hash: str | None = None
+    orb_descriptors: bytes | None = None
     visual_embedding: tuple[float, ...] | None = None
 
 
@@ -53,6 +60,13 @@ class NormalizedCardImage:
     bottom_region_jpeg: bytes
     artwork_region_jpeg: bytes
     blur_score: float
+    rotation_degrees: int = 0
+    localization_score: float = 1.0
+    detected_polygon: tuple[tuple[float, float], ...] = ()
+    original_width: int = 0
+    original_height: int = 0
+    localization_ms: float = 0.0
+    perspective_correction_ms: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +78,28 @@ class OcrReading:
 
 
 @dataclass(frozen=True, slots=True)
+class OrientationResult:
+    """The selected card orientation and OCR outputs reused downstream."""
+
+    image: NormalizedCardImage
+    name: OcrReading
+    collector_number: OcrReading
+    score: float
+    name_ocr_ms: float = 0.0
+    collector_ocr_ms: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class ArtworkEvidence:
+    """Bounded visual signals for one catalog candidate."""
+
+    perceptual_hash_score: float = 0.0
+    orb_score: float = 0.0
+    embedding_score: float = 0.0
+    combined_score: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
 class CandidateEvidence:
     """Independent evidence used to rank a catalog candidate."""
 
@@ -72,6 +108,12 @@ class CandidateEvidence:
     name_score: float
     artwork_score: float
     ocr_quality: float
+    suffix_score: float = 0.0
+    localization_quality: float = 1.0
+    blur_quality: float = 1.0
+    perceptual_hash_score: float = 0.0
+    orb_score: float = 0.0
+    embedding_score: float = 0.0
     confidence: float = 0.0
 
 
@@ -95,4 +137,5 @@ class RecognitionResult:
     candidates: tuple[PricedCandidate, ...]
     processing_ms: float
     message: str | None = None
+    diagnostics: dict[str, object] | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))

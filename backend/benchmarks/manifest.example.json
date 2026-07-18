@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "samples": [
+    {
+      "image": "photos/replace-with-your-real-photo.jpg",
+      "card_id": "tcgdex:en:SET_ID:TCGDEX_CARD_ID"
+    }
+  ]
+}

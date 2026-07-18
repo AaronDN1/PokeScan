@@ -1,72 +1,39 @@
 # API contracts
 
-All product endpoints are versioned under `/api/v1`; `/health` is unversioned for infrastructure probes. Responses are JSON except for the multipart upload.
-
-## `POST /api/v1/recognitions`
-
-Multipart field: `image`. Accepted content: JPEG, PNG, WebP, HEIC/HEIF up to 12 MB and 24 megapixels.
-
-Matched response:
+`POST /api/v1/recognitions` accepts one multipart `image` (JPEG, PNG, WebP, HEIC/HEIF; 12 MB and 24 MP limits). A matched response contains the exact catalog card, bounded alternatives, real confidence, latency, and optional cached price:
 
 ```json
 {
-  "recognition_id": "d8e9bb7d-2630-4dfa-97f2-518888cf58d8",
+  "recognition_id": "uuid",
   "status": "matched",
   "card": {
-    "id": "sv3pt5-006",
-    "name": "Charizard ex",
-    "set_name": "Scarlet & Violet—151",
-    "collector_number": "6",
-    "printed_total": "165",
-    "rarity": "Double Rare",
-    "language": "English",
-    "image_url": "https://catalog.example/cards/sv3pt5-006.webp",
-    "marketplace_url": "https://www.tcgplayer.com/product/example",
+    "id": "tcgdex:en:basep:basep-1",
+    "name": "Pikachu",
+    "set_name": "Wizards Black Star Promos",
+    "collector_number": "1",
+    "printed_total": "53",
+    "rarity": "Common",
+    "language": "en",
+    "image_url": "https://assets.tcgdex.net/en/base/basep/1/high.webp",
+    "marketplace_url": null,
     "price": {
-      "amount": 8.42,
+      "amount": null,
       "currency": "USD",
-      "source": "tcgplayer",
-      "updated_at": "2026-07-18T15:00:00Z"
+      "source": null,
+      "updated_at": null,
+      "price_status": "unavailable"
     }
   },
-  "confidence": 0.94,
+  "confidence": 0.84,
   "candidates": [],
-  "processing_ms": 742.3,
-  "message": null
+  "processing_ms": 11000,
+  "message": null,
+  "diagnostics": null
 }
 ```
 
-`ambiguous` responses set `card` to `null` and include up to three candidates. `unrecognized` returns an empty candidate list when retrieval or verification is insufficient.
+`ambiguous` sets `card` to null and exposes up to three honest candidates. `unrecognized` never chooses a random card. Image errors return 422, rate limiting 429, and missing OCR/catalog/model capability 503 with code `recognition_unavailable`.
 
-Expected upload/recognition failures use HTTP 422:
+`GET /api/v1/cards/{id}` and `GET /api/v1/prices/{id}` read local data. `POST /api/v1/feedback` stores identifiers/correction only, never the photo.
 
-```json
-{ "detail": "The photo is too blurry to identify safely.", "code": "image_too_blurry" }
-```
-
-Codes include `invalid_image`, `image_too_large`, `image_too_blurry`, `card_not_found`, `multiple_cards`, and `recognition_unavailable`. Rate limiting returns 429. Unhandled failures use FastAPI's generic production response and never expose exception text.
-
-## `GET /api/v1/cards/{id}`
-
-Returns one card with its cached price, or 404.
-
-## `GET /api/v1/prices/{id}`
-
-Returns only the cached price. `amount` may be `null`; marketplace failure is never a recognition failure.
-
-## `POST /api/v1/feedback`
-
-```json
-{
-  "recognition_id": "d8e9bb7d-2630-4dfa-97f2-518888cf58d8",
-  "predicted_card_id": "sv3pt5-006",
-  "correct_card_id": "sv3pt5-199",
-  "is_correct": false
-}
-```
-
-Returns 204. No image reference is accepted.
-
-## `GET /health`
-
-Returns API version plus `database` and `models` readiness. Missing model artifacts are reported as `artifacts_required`; database loss degrades the overall status.
+`GET /health` reports `recognition_ready` and independent `ocr`, `artwork_matching`, `catalog`, and optional `pricing` capabilities. An empty catalog or missing OCR/artwork model keeps recognition degraded; missing prices do not.

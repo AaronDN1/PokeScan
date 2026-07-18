@@ -17,21 +17,28 @@ class CardRecord(Base):
 
     __tablename__ = "cards"
     __table_args__ = (
-        Index("ix_cards_number_name", "collector_number", "normalized_name"),
+        Index("ix_cards_number_name", "normalized_collector_number", "normalized_name"),
         Index("ix_cards_marketplace_id", "marketplace_id", unique=True),
     )
 
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    id: Mapped[str] = mapped_column(String(96), primary_key=True)
     name: Mapped[str] = mapped_column(String(180), nullable=False)
     normalized_name: Mapped[str] = mapped_column(String(180), nullable=False, index=True)
-    collector_number: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    collector_number: Mapped[str] = mapped_column(String(32), nullable=False)
+    normalized_collector_number: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     printed_total: Mapped[str | None] = mapped_column(String(32))
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_card_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    set_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     set_name: Mapped[str] = mapped_column(String(180), nullable=False)
     rarity: Mapped[str | None] = mapped_column(String(80))
     language: Mapped[str] = mapped_column(String(12), nullable=False, default="English")
     reference_image_url: Mapped[str] = mapped_column(Text, nullable=False)
-    marketplace_id: Mapped[str] = mapped_column(String(80), nullable=False)
-    marketplace_url: Mapped[str] = mapped_column(Text, nullable=False)
+    marketplace_id: Mapped[str | None] = mapped_column(String(80))
+    marketplace_url: Mapped[str | None] = mapped_column(Text)
+    reference_asset: Mapped[str | None] = mapped_column(Text)
+    perceptual_hash: Mapped[str | None] = mapped_column(String(16))
+    orb_descriptors: Mapped[bytes | None] = mapped_column(LargeBinary)
     visual_embedding: Mapped[bytes | None] = mapped_column(LargeBinary)
 
 

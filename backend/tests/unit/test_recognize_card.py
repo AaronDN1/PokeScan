@@ -1,6 +1,14 @@
 from app.application.confidence import WeightedConfidenceEngine
 from app.application.recognize_card import RecognizeCard
-from app.domain.models import Card, NormalizedCardImage, OcrReading, Price, RecognitionStatus
+from app.domain.models import (
+    ArtworkEvidence,
+    Card,
+    NormalizedCardImage,
+    OcrReading,
+    OrientationResult,
+    Price,
+    RecognitionStatus,
+)
 
 
 class Validator:
@@ -22,13 +30,27 @@ class Ocr:
         return OcrReading("057/182", 0.99)
 
 
+class Orientation:
+    def resolve(self, image: NormalizedCardImage) -> OrientationResult:
+        return OrientationResult(
+            image=image,
+            name=OcrReading("Pikachu ex", 0.98),
+            collector_number=OcrReading("057/182", 0.99),
+            score=0.99,
+        )
+
+
 class Cards:
     card = Card(
         id="sv-test-057",
         name="Pikachu ex",
         normalized_name="pikachu ex",
         collector_number="57",
+        normalized_collector_number="57",
         printed_total="182",
+        source="tcgdex",
+        source_card_id="sv-test-057",
+        set_id="sv-test",
         set_name="Test Set",
         rarity="Double Rare",
         language="English",
@@ -48,6 +70,17 @@ class Artwork:
     def score(self, artwork_jpeg: bytes, card: Card) -> float:
         return 0.98
 
+    def score_many(self, artwork_jpeg: bytes, cards: list[Card]):
+        return {
+            card.id: ArtworkEvidence(
+                perceptual_hash_score=0.95,
+                orb_score=0.97,
+                embedding_score=0.96,
+                combined_score=0.98,
+            )
+            for card in cards
+        }
+
 
 class Prices:
     async def get_price(self, card: Card) -> Price:
@@ -58,7 +91,7 @@ async def test_pipeline_returns_only_a_verified_high_confidence_match() -> None:
     use_case = RecognizeCard(
         validator=Validator(),
         locator=Locator(),
-        ocr=Ocr(),
+        orientation=Orientation(),
         cards=Cards(),
         artwork=Artwork(),
         prices=Prices(),

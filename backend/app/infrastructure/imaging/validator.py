@@ -4,12 +4,26 @@ from __future__ import annotations
 
 from io import BytesIO
 
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
+from pillow_heif import register_heif_opener
 
 from app.domain.errors import ImageTooLargeError, InvalidImageError
 
-_ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"}
-_ALLOWED_FORMATS = {"JPEG", "PNG", "WEBP", "HEIC", "HEIF"}
+register_heif_opener(thumbnails=False)
+
+_ALLOWED_MIME_TYPES = {
+    "application/octet-stream",
+    "image/heic",
+    "image/heif",
+    "image/jpeg",
+    "image/jpg",
+    "image/mpo",
+    "image/pjpeg",
+    "image/png",
+    "image/webp",
+    "image/x-png",
+}
+_ALLOWED_FORMATS = {"HEIF", "JPEG", "MPO", "PNG", "WEBP"}
 
 
 class PillowImageValidator:
@@ -28,9 +42,11 @@ class PillowImageValidator:
 
         try:
             with Image.open(BytesIO(payload)) as image:
-                if image.format not in _ALLOWED_FORMATS:
+                detected_format = image.format
+                if detected_format not in _ALLOWED_FORMATS:
                     raise InvalidImageError(
-                        "The file contents do not match a supported image format."
+                        f"This {detected_format or 'unknown'} image is not supported. "
+                        "Choose a JPEG, PNG, WebP, HEIC, HEIF, or MPO photo."
                     )
                 width, height = image.size
                 if width < 320 or height < 320:
@@ -42,6 +58,16 @@ class PillowImageValidator:
                         "The photo dimensions are too large to process safely."
                     )
                 image.verify()
-        except (UnidentifiedImageError, OSError, ValueError) as error:
+            if detected_format == "HEIF":
+                with Image.open(BytesIO(payload)) as image:
+                    image.seek(0)
+                    transposed = ImageOps.exif_transpose(image)
+                    if transposed is None:
+                        raise InvalidImageError("The uploaded image orientation is invalid.")
+                    normalized = transposed.convert("RGB")
+                    encoded = BytesIO()
+                    normalized.save(encoded, format="JPEG", quality=95, optimize=True)
+                return encoded.getvalue()
+        except (Image.DecompressionBombError, UnidentifiedImageError, OSError, ValueError) as error:
             raise InvalidImageError("The uploaded file is not a readable image.") from error
         return payload

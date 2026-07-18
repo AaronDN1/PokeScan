@@ -13,13 +13,16 @@ dependencies = [
   "python-multipart==0.0.20",
   "pydantic-settings==2.7.1",
   "Pillow==11.1.0",
+  "pillow-heif==1.4.0",
   "numpy==2.2.2",
   "opencv-python-headless==4.11.0.86",
   "SQLAlchemy[asyncio]==2.0.37",
   "asyncpg==0.30.0",
   "aiosqlite==0.20.0",
   "redis==5.2.1",
-  "onnxruntime==1.20.1",
+  "onnx==1.22.0",
+  "onnxruntime==1.27.0",
+  "rapidocr==3.9.1",
   "structlog==24.4.0",
   "httpx==0.28.1",
 ]
@@ -40,6 +43,7 @@ packages = ["app"]
 addopts = "-q --strict-markers"
 testpaths = ["tests"]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.ruff]
 line-length = 100
@@ -54,5 +58,5 @@ strict = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["onnxruntime", "cv2"]
+module = ["onnxruntime", "onnx", "cv2", "pillow_heif", "rapidocr"]
 ignore_missing_imports = true

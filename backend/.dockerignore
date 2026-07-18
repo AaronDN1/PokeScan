@@ -1,0 +1,13 @@
+.venv
+.test-venv
+.env*
+__pycache__
+.pytest_cache
+.mypy_cache
+.ruff_cache
+data/reference-images
+data/*.json
+data/*.db
+models/*.onnx
+tests
+benchmarks/photos

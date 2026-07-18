@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile.web
       args:
-        NEXT_PUBLIC_API_URL: http://localhost:8000
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
     ports:
       - "5173:5173"
     depends_on:
@@ -23,7 +23,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./backend/models:/app/models:ro
+      - ./backend/data:/app/data
     depends_on:
       postgres:
         condition: service_healthy
@@ -34,6 +34,23 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+
+  setup:
+    build:
+      context: ./backend
+    command: ["python", "scripts/bootstrap_dev.py", "--rebuild-catalog"]
+    environment:
+      POKELENS_ENVIRONMENT: development
+      POKELENS_DATABASE_URL: postgresql+asyncpg://pokelens:pokelens@postgres:5432/pokelens
+      POKELENS_REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./backend/data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    profiles: ["setup"]
 
   postgres:
     image: postgres:17-alpine

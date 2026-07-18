@@ -9,7 +9,8 @@ interface UploadPanelProps {
   onSelect: (file: File) => void;
 }
 
-const ACCEPTED_TYPES = "image/jpeg,image/png,image/webp,image/heic,image/heif";
+const ACCEPTED_TYPES =
+  ".jpg,.jpeg,.jfif,.png,.webp,.heic,.heif,.mpo,image/jpeg,image/png,image/webp,image/heic,image/heif";
 
 export function UploadPanel({ disabled = false, onSelect }: UploadPanelProps) {
   const cameraRef = useRef<HTMLInputElement>(null);

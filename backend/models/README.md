@@ -1,13 +1,11 @@
 # Model artifacts
 
-Production model binaries are intentionally not committed. Mount or copy these versioned artifacts here:
+The default baseline does not require custom-trained models.
 
-| File | Input | Output | Purpose |
-| --- | --- | --- | --- |
-| `ocr-name.onnx` | `float32[1,1,48,320]` | CTC logits `[1,T,C]` | Top-region card name OCR |
-| `ocr-number.onnx` | `float32[1,1,48,320]` | CTC logits `[1,T,C]` | Bottom-region collector number OCR |
-| `artwork-embedding.onnx` | `float32[1,3,224,224]` | embedding `[1,D]` | Candidate-only artwork verification |
+- `rapidocr==3.9.1` initializes pretrained PP-OCRv6 tiny detector/recognizer assets during `scripts/bootstrap_dev.py`.
+- `scripts/download_pretrained_models.py` downloads the pinned ONNX Model Zoo MobileNetV2-12 classifier, verifies SHA-256, and exposes its 1,280-value penultimate feature tensor as `mobilenetv2-features.onnx`.
+- ONNX Runtime CPU sessions are retained per API process.
 
-The API remains healthy without the files, but `/health` reports `artifacts_required` and scan requests return a safe `recognition_unavailable` response. This prevents a development checkout from falsely presenting heuristic guesses as confident matches.
+Downloaded binaries are intentionally ignored by Git. Setup is explicit; normal scan requests never download a model.
 
-Every promoted model must be paired with its benchmark report, dataset manifest, charset, SHA-256 digest, and semantic version. See `../../docs/benchmarks.md`.
+The future custom backends still accept `ocr-name.onnx`, `ocr-number.onnx`, and `artwork-embedding.onnx` using the original input/output contracts. Enable them only with the matching backend environment variables and benchmark report.
