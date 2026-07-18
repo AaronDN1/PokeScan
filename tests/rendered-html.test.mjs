@@ -18,6 +18,8 @@ test("ships the focused scanner experience without starter metadata", async () =
   assert.doesNotMatch(layout, /codex-preview|Starter Project/);
   assert.match(scanner, /Take photo|UploadPanel/);
   assert.match(scanner, /Scanner ready/);
+  assert.match(scanner, /Scanner offline/);
+  assert.match(scanner, /disabled=\{!scannerReady\}/);
   assert.match(manifest, /standalone/);
   assert.match(packageJson, /@tanstack\/react-query/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);

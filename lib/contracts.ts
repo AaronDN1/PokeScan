@@ -35,7 +35,15 @@ export const recognitionResponseSchema = z.object({
   message: z.string().nullable(),
 });
 
+export const healthResponseSchema = z.object({
+  status: z.enum(["ready", "degraded"]),
+  version: z.string(),
+  database: z.enum(["ready", "unavailable"]),
+  models: z.enum(["ready", "artifacts_required"]),
+});
+
 export type Card = z.infer<typeof cardSchema>;
 export type RecognitionResponse = z.infer<typeof recognitionResponseSchema>;
+export type HealthResponse = z.infer<typeof healthResponseSchema>;
 
 export type ScanStage = "preparing" | "locating" | "reading" | "matching";

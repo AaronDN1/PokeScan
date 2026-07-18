@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { AlertCircle, ScanLine } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -9,7 +9,7 @@ import { ResultCard } from "@/components/scanner/result-card";
 import { ScanProgress } from "@/components/scanner/scan-progress";
 import { UploadPanel } from "@/components/scanner/upload-panel";
 import { Button } from "@/components/ui/button";
-import { ApiError, recognizeCard } from "@/lib/api";
+import { ApiError, getHealth, recognizeCard } from "@/lib/api";
 import type { ScanStage } from "@/lib/contracts";
 
 const MAX_UPLOAD_BYTES = 12 * 1024 * 1024;
@@ -20,6 +20,24 @@ export function ScannerApp() {
   const [stage, setStage] = useState<ScanStage>("preparing");
   const [validationError, setValidationError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  const healthQuery = useQuery({
+    queryKey: ["scanner-health"],
+    queryFn: ({ signal }) => getHealth(signal),
+    retry: 1,
+    refetchInterval: 30_000,
+  });
+  const scannerReady =
+    healthQuery.data?.status === "ready" &&
+    healthQuery.data.database === "ready" &&
+    healthQuery.data.models === "ready";
+  const scannerStatus = healthQuery.isPending
+    ? "Checking scanner"
+    : scannerReady
+      ? "Scanner ready"
+      : healthQuery.data?.models === "artifacts_required"
+        ? "Models required"
+        : "Scanner offline";
 
   const mutation = useMutation({
     mutationFn: ({ file, signal }: { file: File; signal: AbortSignal }) => recognizeCard(file, signal),
@@ -89,14 +107,22 @@ export function ScannerApp() {
             <span className="text-[15px] font-semibold tracking-[-0.025em] text-[#eef3fa]">PokéLens</span>
           </Link>
           <div className="flex items-center gap-2 text-[11px] font-medium text-[#778391]">
-            <span className="h-1.5 w-1.5 rounded-full bg-[#70d7a5] shadow-[0_0_8px_rgba(112,215,165,0.55)]" />
-            Scanner ready
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                scannerReady
+                  ? "bg-[#70d7a5] shadow-[0_0_8px_rgba(112,215,165,0.55)]"
+                  : healthQuery.isPending
+                    ? "bg-[#e1bd71] [animation:pulse-soft_1.1s_ease-in-out_infinite]"
+                    : "bg-[#ff8d8d]"
+              }`}
+            />
+            {scannerStatus}
           </div>
         </div>
       </header>
 
       <main className="mx-auto w-full max-w-[880px] px-4 pb-10 pt-8 sm:px-8 sm:pb-16 sm:pt-12">
-        {mutation.isIdle ? <UploadPanel onSelect={selectFile} /> : null}
+        {mutation.isIdle ? <UploadPanel disabled={!scannerReady} onSelect={selectFile} /> : null}
         {mutation.isPending && previewUrl ? (
           <ScanProgress previewUrl={previewUrl} stage={stage} onCancel={reset} />
         ) : null}
@@ -106,7 +132,15 @@ export function ScannerApp() {
         {mutation.isSuccess && mutation.data.status !== "matched" ? (
           <CandidateList result={mutation.data} onReset={reset} />
         ) : null}
-        {mutation.isError ? <UploadPanel onSelect={selectFile} /> : null}
+        {mutation.isError ? <UploadPanel disabled={!scannerReady} onSelect={selectFile} /> : null}
+
+        {!healthQuery.isPending && !scannerReady && mutation.isIdle ? (
+          <div className="mt-4 rounded-[14px] border border-white/[0.07] bg-white/[0.025] px-4 py-3 text-center text-[12px] leading-5 text-[#7f8997]">
+            {healthQuery.data?.models === "artifacts_required"
+              ? "The API is online, but benchmark-approved model artifacts must be installed before scanning."
+              : "This frontend is ready for review. Connect the production recognition API to enable scanning."}
+          </div>
+        ) : null}
 
         {errorMessage ? (
           <div className="mt-4 flex items-start gap-3 rounded-[14px] border border-[#ff8d8d]/20 bg-[#ff8d8d]/[0.065] p-4 text-[13px] leading-5 text-[#efaaaa]" role="alert">
