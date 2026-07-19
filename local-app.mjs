@@ -1,16 +1,17 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const backend = path.join(root, "backend");
+const venvRoot = path.join(backend, ".venv");
 const isWindows = process.platform === "win32";
 const venvPython = path.join(
-  backend,
-  ".venv",
+  venvRoot,
   isWindows ? "Scripts/python.exe" : "bin/python",
 );
+const venvConfig = path.join(venvRoot, "pyvenv.cfg");
 const nextBin = path.join(root, "node_modules", "next", "dist", "bin", "next");
 const setupOnly = process.argv.includes("--setup");
 const quickCatalog = process.argv.includes("--quick");
@@ -47,15 +48,23 @@ function runCaptured(command, args, options = {}) {
 }
 
 async function createVenv() {
-  if (existsSync(venvPython)) return;
+  if (
+    existsSync(venvConfig)
+    && existsSync(venvPython)
+    && await runCaptured(venvPython, ["--version"], { cwd: backend })
+  ) return;
+  if (existsSync(venvRoot)) {
+    console.log("Repairing an incomplete local Python environment...");
+    rmSync(venvRoot, { recursive: true, force: true });
+  }
   console.log("Preparing the local Python environment (first run only)...");
   if (isWindows) {
-    const created = await runCaptured("py", ["-3.12", "-m", "venv", path.join(backend, ".venv")]);
+    const created = await runCaptured("py", ["-3.12", "-m", "venv", venvRoot]);
     if (!created) {
       throw new Error("Python 3.12 was not found. Install Python 3.12, then run pnpm.cmd setup again.");
     }
   } else {
-    await run("python3.12", ["-m", "venv", path.join(backend, ".venv")]);
+    await run("python3.12", ["-m", "venv", venvRoot]);
   }
 }
 

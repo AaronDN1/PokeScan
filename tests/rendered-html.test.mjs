@@ -59,3 +59,11 @@ test("does not retain uploaded card images in browser storage", async () => {
   assert.match(source, /FormData/);
   assert.match(source, /startsWith\("\/api\/"\)/);
 });
+
+test("repairs a partial Python environment before setup", async () => {
+  const launcher = await readFile(new URL("local-app.mjs", root), "utf8");
+
+  assert.match(launcher, /existsSync\(venvConfig\)/);
+  assert.match(launcher, /Repairing an incomplete local Python environment/);
+  assert.match(launcher, /rmSync\(venvRoot, \{ recursive: true, force: true \}\)/);
+});
