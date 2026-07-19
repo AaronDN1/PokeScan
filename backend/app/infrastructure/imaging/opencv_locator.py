@@ -26,6 +26,7 @@ _CARD_WIDTH = 744
 _CARD_HEIGHT = 1039
 ImageArray = NDArray[np.uint8]
 PointArray = NDArray[np.float32]
+ContourArray = NDArray[np.int32]
 
 
 class OpenCvCardLocator:
@@ -129,43 +130,66 @@ class OpenCvCardLocator:
     @staticmethod
     def _find_card_quadrilaterals(image: ImageArray) -> list[PointArray]:
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-        edges = cv2.Canny(blurred, 30, 108)
+        lab = cast(ImageArray, cv2.cvtColor(image, cv2.COLOR_BGR2LAB))
+        edge_channels = (gray, lab[:, :, 1], lab[:, :, 2])
+        edges = np.zeros_like(gray)
+        for channel in edge_channels:
+            blurred = cv2.GaussianBlur(channel, (5, 5), 0)
+            channel_edges = cv2.Canny(blurred, 24, 112)
+            edges = cv2.bitwise_or(edges, channel_edges)
         edges = cv2.morphologyEx(
             edges,
             cv2.MORPH_CLOSE,
             np.ones((9, 9), np.uint8),
             iterations=3,
         )
-        contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-        image_area = image.shape[0] * image.shape[1]
-        candidates: list[tuple[float, PointArray]] = []
-        for contour in contours:
-            area = float(cv2.contourArea(contour))
-            if area < image_area * 0.14:
-                continue
-            perimeter = cv2.arcLength(contour, True)
-            polygon = cv2.approxPolyDP(contour, 0.025 * perimeter, True)
-            if len(polygon) != 4 or not cv2.isContourConvex(polygon):
-                continue
-            points = polygon.reshape(4, 2).astype(np.float32)
-            height, width = image.shape[:2]
-            touches_frame = any(
-                point[0] <= 2
-                or point[1] <= 2
-                or point[0] >= width - 3
-                or point[1] >= height - 3
-                for point in points
+        foreground = OpenCvCardLocator._foreground_mask(lab)
+        contours: list[ContourArray] = []
+        for contour_source in (edges, foreground):
+            source_contours, _ = cv2.findContours(
+                contour_source,
+                cv2.RETR_LIST,
+                cv2.CHAIN_APPROX_SIMPLE,
             )
-            if touches_frame:
+            contours.extend(cast(list[ContourArray], source_contours))
+        image_area = image.shape[0] * image.shape[1]
+        candidates: list[tuple[float, bool, PointArray]] = []
+        edge_contour_count = len(
+            cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)[0]
+        )
+        for contour_index, contour in enumerate(contours):
+            is_foreground_fallback = contour_index >= edge_contour_count
+            area = float(cv2.contourArea(contour))
+            if area < image_area * 0.08:
                 continue
-            if OpenCvCardLocator._plausible_ratio(points):
-                candidates.append((area, points))
+            hull = cv2.convexHull(contour)
+            perimeter = cv2.arcLength(hull, True)
+            for epsilon in (0.018, 0.025, 0.04, 0.06):
+                polygon = cv2.approxPolyDP(hull, epsilon * perimeter, True)
+                if len(polygon) != 4 or not cv2.isContourConvex(polygon):
+                    continue
+                points = polygon.reshape(4, 2).astype(np.float32)
+                if OpenCvCardLocator._touches_too_many_frame_sides(points, image):
+                    continue
+                if OpenCvCardLocator._plausible_ratio(points):
+                    polygon_area = float(cv2.contourArea(points))
+                    candidates.append((polygon_area, is_foreground_fallback, points))
+                    break
+        largest_edge_area = max(
+            (area for area, is_fallback, _points in candidates if not is_fallback),
+            default=0.0,
+        )
+        if largest_edge_area:
+            candidates = [
+                candidate
+                for candidate in candidates
+                if not candidate[1] or candidate[0] >= largest_edge_area * 1.75
+            ]
         candidates.sort(key=lambda item: item[0], reverse=True)
         selected: list[PointArray] = []
-        for _area, candidate_points in candidates:
+        for _area, _is_fallback, candidate_points in candidates:
             if any(
-                OpenCvCardLocator._bounding_iou(candidate_points, existing) >= 0.72
+                OpenCvCardLocator._same_subject(candidate_points, existing)
                 for existing in selected
             ):
                 continue
@@ -173,6 +197,78 @@ class OpenCvCardLocator:
             if len(selected) == 2:
                 break
         return selected
+
+    @staticmethod
+    def _foreground_mask(lab: ImageArray) -> ImageArray:
+        """Estimate a dominant centered subject from the photo's corner colors."""
+        height, width = lab.shape[:2]
+        patch_height = max(8, int(height * 0.06))
+        patch_width = max(8, int(width * 0.06))
+        corner_pixels = np.concatenate(
+            (
+                lab[:patch_height, :patch_width].reshape(-1, 3),
+                lab[:patch_height, -patch_width:].reshape(-1, 3),
+                lab[-patch_height:, :patch_width].reshape(-1, 3),
+                lab[-patch_height:, -patch_width:].reshape(-1, 3),
+            )
+        )
+        background = np.median(corner_pixels, axis=0).astype(np.float32)
+        distance = np.linalg.norm(lab.astype(np.float32) - background, axis=2)
+        distance_u8 = np.clip(distance, 0, 255).astype(np.uint8)
+        threshold, mask = cv2.threshold(
+            distance_u8,
+            0,
+            255,
+            cv2.THRESH_BINARY + cv2.THRESH_OTSU,
+        )
+        if threshold < 8:
+            _, mask = cv2.threshold(distance_u8, 8, 255, cv2.THRESH_BINARY)
+        mask = cv2.morphologyEx(
+            mask,
+            cv2.MORPH_CLOSE,
+            np.ones((15, 15), np.uint8),
+            iterations=2,
+        )
+        return cast(
+            ImageArray,
+            cv2.morphologyEx(
+                mask,
+                cv2.MORPH_OPEN,
+                np.ones((5, 5), np.uint8),
+                iterations=1,
+            ),
+        )
+
+    @staticmethod
+    def _touches_too_many_frame_sides(points: PointArray, image: ImageArray) -> bool:
+        height, width = image.shape[:2]
+        margin = max(3.0, min(width, height) * 0.006)
+        touched_sides = {
+            side
+            for side, touched in (
+                ("left", bool(np.any(points[:, 0] <= margin))),
+                ("right", bool(np.any(points[:, 0] >= width - 1 - margin))),
+                ("top", bool(np.any(points[:, 1] <= margin))),
+                ("bottom", bool(np.any(points[:, 1] >= height - 1 - margin))),
+            )
+            if touched
+        }
+        # Morphological closing can expand a real card border into one or two
+        # frame edges. Three or four touched sides is instead usually the image
+        # boundary itself, which must never be treated as a detected card.
+        return len(touched_sides) >= 3
+
+    @staticmethod
+    def _same_subject(left: PointArray, right: PointArray) -> bool:
+        if OpenCvCardLocator._bounding_iou(left, right) >= 0.72:
+            return True
+        lx, ly, lw, lh = cv2.boundingRect(left)
+        rx, ry, rw, rh = cv2.boundingRect(right)
+        intersection_width = max(0, min(lx + lw, rx + rw) - max(lx, rx))
+        intersection_height = max(0, min(ly + lh, ry + rh) - max(ly, ry))
+        intersection = float(intersection_width * intersection_height)
+        smaller = float(min(lw * lh, rw * rh))
+        return smaller > 0 and intersection / smaller >= 0.82
 
     @staticmethod
     def _bounding_iou(left: PointArray, right: PointArray) -> float:

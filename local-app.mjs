@@ -92,6 +92,19 @@ async function health() {
   }
 }
 
+async function webStatus() {
+  try {
+    const response = await fetch("http://127.0.0.1:5173", {
+      signal: AbortSignal.timeout(1500),
+      cache: "no-store",
+    });
+    const body = await response.text();
+    return { occupied: true, pokelens: body.includes("PokéLens") };
+  } catch {
+    return { occupied: false, pokelens: false };
+  }
+}
+
 async function waitForHealth(child) {
   for (let attempt = 0; attempt < 120; attempt += 1) {
     if (child.exitCode !== null) throw new Error("The recognition API stopped during startup.");
@@ -117,6 +130,7 @@ function startChild(command, args, options = {}) {
 function shutdown(exitCode = 0) {
   if (stopping) return;
   stopping = true;
+  process.exitCode = exitCode;
   for (const child of children) {
     if (!child.pid) continue;
     if (isWindows) {
@@ -128,7 +142,7 @@ function shutdown(exitCode = 0) {
       child.kill("SIGTERM");
     }
   }
-  setTimeout(() => process.exit(exitCode), 250).unref();
+  setTimeout(() => process.exit(exitCode), 250);
 }
 
 async function startApp() {
@@ -154,6 +168,23 @@ async function startApp() {
   }
 
   console.log(`Recognition ready with ${currentHealth.capabilities.catalog.card_count} catalog cards.`);
+  apiChild?.once("exit", (code) => {
+    if (!stopping) {
+      console.error(`Recognition API stopped unexpectedly (exit ${code ?? "unknown"}).`);
+      shutdown(code ?? 1);
+    }
+  });
+
+  const currentWeb = await webStatus();
+  if (currentWeb.pokelens) {
+    console.log("Using the PokéLens web app already running on port 5173.");
+    console.log("PokéLens is ready at http://127.0.0.1:5173");
+    return;
+  }
+  if (currentWeb.occupied) {
+    throw new Error("Port 5173 is already in use by another web app. Stop that app, then try again.");
+  }
+
   console.log("Opening PokéLens at http://127.0.0.1:5173");
   const webChild = startChild(
     process.execPath,
@@ -161,12 +192,6 @@ async function startApp() {
     { cwd: root },
   );
   webChild.once("exit", (code) => shutdown(code ?? 1));
-  apiChild?.once("exit", (code) => {
-    if (!stopping) {
-      console.error(`Recognition API stopped unexpectedly (exit ${code ?? "unknown"}).`);
-      shutdown(code ?? 1);
-    }
-  });
 }
 
 process.on("SIGINT", () => shutdown(0));
