@@ -27,18 +27,37 @@ Run catalog/reference preparation before serving traffic and persist `data/` or 
 
 Release order: build the image, run catalog setup/import, deploy the API, verify `recognition_ready=true`, build the web app with the public API URL, then execute real-card and error-case smoke tests. Pricing can remain empty. Scale cautiously because each API worker holds its own CPU model sessions; benchmark worker count and p95 on the chosen instance.
 
-This repository was prepared for deployment but was not deployed by Codex because no backend cloud credentials/target were supplied.
+The frontend can be deployed independently as soon as it is configured with a
+reachable API URL. The backend target determines whether that URL is permanent
+or intended only for a test session.
 
-## Free personal mobile test deployment
+## No-cost personal mobile test
 
-GitHub Pages cannot run the Python recognition service. For a no-cost personal
-test deployment, keep the frontend on the existing Sites project and run the
-backend as a public Hugging Face Docker Space. The Space's free CPU tier is large
-enough for the OCR and visual indexes, but it sleeps after extended inactivity;
-the first request after sleep therefore has a cold-start delay.
+GitHub Pages cannot run the Python recognition service. For an immediate
+no-cost mobile test, keep the frontend on the existing Sites project and expose
+the locally running API through a Cloudflare Quick Tunnel:
+
+```powershell
+pnpm.cmd dev
+.\backend\.venv\Scripts\cloudflared.exe tunnel --url http://127.0.0.1:8000 --no-autoupdate
+```
+
+Add the Sites origin to `POKELENS_CORS_ORIGINS`, then build and publish the
+frontend with `NEXT_PUBLIC_API_BASE_URL` set to the generated
+`https://*.trycloudflare.com` address. Quick Tunnels are development tools: the
+computer and API must stay running, there is no uptime guarantee, and the URL
+changes when the tunnel is recreated.
+
+## Hosted Docker option
+
+`deploy/huggingface/Dockerfile` packages the complete catalog into a Hugging
+Face Docker Space. As of July 2026, the live Hugging Face API requires a Pro
+subscription to create a Docker Space; CPU Basic is no longer available for
+free accounts. This path therefore is not the no-cost default.
 
 The workflow in `.github/workflows/deploy-huggingface.yml` creates or updates the
-Space manually. Configure these GitHub repository settings before running it:
+Space manually for an account with Docker Space access. Configure these GitHub
+repository settings before running it:
 
 1. Create a Hugging Face write token.
 2. Add that token as the repository secret `HF_TOKEN`.
@@ -52,7 +71,12 @@ reports `recognition_ready=true` at `/health`, set the Sites production variable
 `NEXT_PUBLIC_API_BASE_URL` to `https://username-pokelens-api.hf.space`, rebuild,
 and publish the frontend.
 
-The free Space filesystem is ephemeral. That is acceptable for recognition
-because the catalog is part of the image; cached prices and user feedback may be
-lost on a restart. Move those mutable records to a hosted database before using
-this architecture beyond personal testing.
+The Space filesystem is ephemeral. That is acceptable for recognition because
+the catalog is part of the image; cached prices and user feedback may be lost
+on a restart. Move those mutable records to a hosted database before using this
+architecture beyond personal testing.
+
+For a permanent backend without keeping a computer on, use a service with at
+least 1 GiB RAM and enough CPU for image inference. Current practical choices
+include Modal's monthly starter credit or Google Cloud Run's monthly free quota;
+both require a separate cloud account, and Cloud Run requires billing setup.

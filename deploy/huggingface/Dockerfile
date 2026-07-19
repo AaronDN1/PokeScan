@@ -24,7 +24,7 @@ COPY scripts ./scripts
 COPY models ./models
 COPY data ./data
 
-# The free Space has ephemeral runtime storage. Build the complete catalog and
+# The Space has ephemeral runtime storage. Build the complete catalog and
 # visual index into the image so waking or restarting never downloads 19,000+
 # reference cards before the API can become healthy. A nonzero build argument is
 # available only for local smoke builds; hosted builds intentionally use zero.
@@ -40,6 +40,6 @@ EXPOSE 7860
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7860/health', timeout=8)"
 
-# One worker avoids duplicating the in-memory OCR and visual indexes. The free
-# CPU instance is intended for personal mobile testing, not concurrent load.
+# One worker avoids duplicating the in-memory OCR and visual indexes. This CPU
+# configuration is intended for personal mobile testing, not concurrent load.
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7860", "--workers", "1", "--no-access-log"]

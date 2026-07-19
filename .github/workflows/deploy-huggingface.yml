@@ -1,4 +1,4 @@
-name: deploy recognition api
+name: deploy recognition api (Hugging Face Pro)
 
 on:
   workflow_dispatch:
