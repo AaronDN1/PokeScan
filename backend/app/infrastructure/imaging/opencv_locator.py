@@ -44,19 +44,16 @@ class OpenCvCardLocator:
         original_height, original_width = original.shape[:2]
         image = self._bounded_resize(original)
         localization_started = perf_counter()
-        quadrilaterals = self._find_card_quadrilaterals(image)
+        # A canonical crop is already the output of this localization stage. Do not
+        # mistake its artwork frame or a large rules box for a second, smaller card
+        # when a normalized image is retried or passed between app layers.
+        canonical_crop = self._is_canonical_crop(image)
+        quadrilaterals = (
+            [] if canonical_crop else self._find_card_quadrilaterals(image)
+        )
         if len(quadrilaterals) > 1:
             raise MultipleCardsError("Only one card can be scanned at a time.")
-        if quadrilaterals:
-            selected_polygon = quadrilaterals[0]
-            localization_ms = round((perf_counter() - localization_started) * 1000, 2)
-            warp_started = perf_counter()
-            card = self._warp(image, selected_polygon)
-            perspective_correction_ms = round((perf_counter() - warp_started) * 1000, 2)
-            image_area = float(image.shape[0] * image.shape[1])
-            area_ratio = float(cv2.contourArea(selected_polygon)) / max(image_area, 1.0)
-            localization_score = max(0.35, min(1.0, area_ratio / 0.58))
-        elif self._already_card_shaped(image):
+        if canonical_crop or (not quadrilaterals and self._already_card_shaped(image)):
             localization_ms = round((perf_counter() - localization_started) * 1000, 2)
             warp_started = perf_counter()
             card = cast(
@@ -77,7 +74,16 @@ class OpenCvCardLocator:
                 ],
                 dtype=np.float32,
             )
-            localization_score = 0.92
+            localization_score = 0.98 if canonical_crop else 0.92
+        elif quadrilaterals:
+            selected_polygon = quadrilaterals[0]
+            localization_ms = round((perf_counter() - localization_started) * 1000, 2)
+            warp_started = perf_counter()
+            card = self._warp(image, selected_polygon)
+            perspective_correction_ms = round((perf_counter() - warp_started) * 1000, 2)
+            image_area = float(image.shape[0] * image.shape[1])
+            area_ratio = float(cv2.contourArea(selected_polygon)) / max(image_area, 1.0)
+            localization_score = max(0.35, min(1.0, area_ratio / 0.58))
         else:
             raise CardNotFoundError("Keep all four card edges visible and try again.")
 
@@ -136,20 +142,41 @@ class OpenCvCardLocator:
         # compressed photos where the ordinary grayscale contour can join the frame.
         dark_gray = cv2.convertScaleAbs(gray, alpha=0.70, beta=-8)
         edge_channels = (gray, dark_gray, lab[:, :, 1], lab[:, :, 2])
-        edges = np.zeros_like(gray)
-        for channel in edge_channels:
-            blurred = cv2.GaussianBlur(channel, (5, 5), 0)
-            channel_edges = cv2.Canny(blurred, 24, 112)
-            edges = cv2.bitwise_or(edges, channel_edges)
-        edges = cv2.morphologyEx(
-            edges,
-            cv2.MORPH_CLOSE,
-            np.ones((9, 9), np.uint8),
-            iterations=3,
-        )
+        edge_sources: list[ImageArray] = []
+        for low, high in ((24, 112), (50, 180)):
+            edges = np.zeros_like(gray)
+            for channel in edge_channels:
+                blurred = cv2.GaussianBlur(channel, (5, 5), 0)
+                channel_edges = cv2.Canny(blurred, low, high)
+                edges = cv2.bitwise_or(edges, channel_edges)
+            # A light close preserves low-contrast card borders on textured surfaces.
+            # The heavier legacy close remains as a separate hypothesis for genuinely
+            # broken borders instead of being allowed to merge every background edge.
+            edge_sources.extend(
+                (
+                    cast(
+                        ImageArray,
+                        cv2.morphologyEx(
+                            edges,
+                            cv2.MORPH_CLOSE,
+                            np.ones((3, 3), np.uint8),
+                            iterations=1,
+                        ),
+                    ),
+                    cast(
+                        ImageArray,
+                        cv2.morphologyEx(
+                            edges,
+                            cv2.MORPH_CLOSE,
+                            np.ones((9, 9), np.uint8),
+                            iterations=3,
+                        ),
+                    ),
+                )
+            )
         foreground = OpenCvCardLocator._foreground_mask(lab)
         contours: list[ContourArray] = []
-        for contour_source in (edges, foreground):
+        for contour_source in (*edge_sources, foreground):
             source_contours, _ = cv2.findContours(
                 contour_source,
                 cv2.RETR_LIST,
@@ -157,18 +184,14 @@ class OpenCvCardLocator:
             )
             contours.extend(cast(list[ContourArray], source_contours))
         image_area = image.shape[0] * image.shape[1]
-        candidates: list[tuple[float, bool, PointArray]] = []
-        edge_contour_count = len(
-            cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)[0]
-        )
-        for contour_index, contour in enumerate(contours):
-            is_foreground_fallback = contour_index >= edge_contour_count
+        candidates: list[tuple[float, PointArray]] = []
+        for contour in contours:
             area = float(cv2.contourArea(contour))
             if area < image_area * 0.08:
                 continue
             hull = cv2.convexHull(contour)
             perimeter = cv2.arcLength(hull, True)
-            for epsilon in (0.018, 0.025, 0.04, 0.06):
+            for epsilon in (0.01, 0.014, 0.018, 0.025, 0.04, 0.06):
                 polygon = cv2.approxPolyDP(hull, epsilon * perimeter, True)
                 if len(polygon) != 4 or not cv2.isContourConvex(polygon):
                     continue
@@ -177,7 +200,7 @@ class OpenCvCardLocator:
                     continue
                 if OpenCvCardLocator._plausible_ratio(points):
                     polygon_area = float(cv2.contourArea(points))
-                    candidates.append((polygon_area, is_foreground_fallback, points))
+                    candidates.append((polygon_area, points))
                     break
         # Compression and wood-grain backgrounds can join one card corner to the
         # frame, producing a slightly larger but badly skewed edge contour. Rank
@@ -185,11 +208,11 @@ class OpenCvCardLocator:
         # retain the independent foreground-mask candidates for comparison.
         candidates.sort(
             key=lambda item: item[0]
-            * OpenCvCardLocator._candidate_quality(item[2], image),
+            * OpenCvCardLocator._candidate_quality(item[1], image),
             reverse=True,
         )
         selected: list[PointArray] = []
-        for _area, _is_fallback, candidate_points in candidates:
+        for _area, candidate_points in candidates:
             if any(
                 OpenCvCardLocator._same_subject(candidate_points, existing)
                 for existing in selected
@@ -313,6 +336,14 @@ class OpenCvCardLocator:
         height, width = image.shape[:2]
         short, long = sorted((width, height))
         return long > 0 and 0.62 <= short / long <= 0.74
+
+    @staticmethod
+    def _is_canonical_crop(image: ImageArray) -> bool:
+        height, width = image.shape[:2]
+        return (width, height) in {
+            (_CARD_WIDTH, _CARD_HEIGHT),
+            (_CARD_HEIGHT, _CARD_WIDTH),
+        }
 
     @staticmethod
     def _portrait(image: ImageArray) -> ImageArray:
