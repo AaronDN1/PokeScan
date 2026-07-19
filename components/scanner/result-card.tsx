@@ -17,6 +17,12 @@ export function ResultCard({ result, onReset }: ResultCardProps) {
   const confidence = Math.round(result.confidence * 100);
   const confirmed = result.status === "matched";
   const StatusIcon = confirmed ? CheckCircle2 : ScanSearch;
+  const conditionPrices = [
+    { code: "NM", label: "Near Mint", value: card.price.near_mint },
+    { code: "LP", label: "Lightly Played", value: card.price.lightly_played },
+    { code: "MP", label: "Moderately Played", value: card.price.moderately_played },
+  ];
+  const hasConditionPrices = conditionPrices.some(({ value }) => value !== null);
 
   return (
     <section className="[animation:result-enter_360ms_ease-out]" aria-live="polite">
@@ -64,23 +70,54 @@ export function ResultCard({ result, onReset }: ResultCardProps) {
             </dl>
 
             <div className="mt-7">
-              <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-[#66717f]">Current market price</p>
-              <div className="mt-2 flex items-baseline gap-2">
-                <span className="text-[34px] font-semibold tracking-[-0.04em] text-[#f5f7fa]">{formatUsd(card.price.amount)}</span>
-                {card.price.amount !== null ? <span className="text-[12px] text-[#778391]">USD</span> : null}
+              <div className="flex flex-wrap items-end justify-between gap-2">
+                <div>
+                  <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-[#66717f]">Recent market averages</p>
+                  <p className="mt-1 text-[12px] text-[#8c98a7]">TCGplayer market prices by condition</p>
+                </div>
+                {card.price.printing_name ? <span className="text-[11px] text-[#778391]">{card.price.printing_name}</span> : null}
               </div>
-              {card.price.updated_at ? <p className="mt-1 text-[11px] text-[#66717f]">Cached {new Date(card.price.updated_at).toLocaleDateString()}</p> : null}
+
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                {conditionPrices.map(({ code, label, value }) => (
+                  <div key={code} className="rounded-[12px] border border-white/[0.08] bg-white/[0.025] px-3 py-3">
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-[12px] font-semibold text-[#b8c3d0]">{code}</span>
+                      <span className="hidden text-[10px] text-[#687483] lg:inline">{label}</span>
+                    </div>
+                    <p className="mt-1.5 text-[18px] font-semibold tracking-[-0.025em] text-[#f5f7fa]">
+                      {value === null ? "—" : formatUsd(value)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              {!hasConditionPrices && card.price.amount !== null ? (
+                <div className="mt-3 flex items-baseline justify-between rounded-[12px] border border-white/[0.08] px-3 py-2.5">
+                  <span className="text-[11px] text-[#8c98a7]">Overall market</span>
+                  <span className="text-[16px] font-semibold text-[#f5f7fa]">{formatUsd(card.price.amount)}</span>
+                </div>
+              ) : null}
+
+              {!hasConditionPrices ? (
+                <p className="mt-3 text-[11px] leading-5 text-[#778391]">
+                  Condition averages are unavailable without approved TCGplayer API access.
+                </p>
+              ) : null}
+              {card.price.updated_at ? <p className="mt-2 text-[11px] text-[#66717f]">Updated {new Date(card.price.updated_at).toLocaleDateString()}</p> : null}
+              <p className="mt-2 text-[10px] leading-4 text-[#596573]">
+                TCGplayer market data. PokéLens is not endorsed or certified by TCGplayer.
+              </p>
             </div>
 
             <div className="mt-auto grid gap-3 pt-8">
               {card.marketplace_url ? (
                 <a
                   href={card.marketplace_url}
-                  target="_blank"
-                  rel="noreferrer"
+                  rel="external"
                   className="inline-flex min-h-12 items-center justify-center gap-2 rounded-[12px] bg-[#f2f6fc] px-5 text-[14px] font-semibold text-[#0a0e14] transition-colors hover:bg-white"
                 >
-                  View marketplace listing
+                  {card.price.product_id ? "Open in TCGplayer" : "Search TCGplayer"}
                   <ArrowUpRight aria-hidden="true" className="h-4 w-4" />
                 </a>
               ) : null}

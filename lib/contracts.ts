@@ -5,6 +5,12 @@ export const priceSchema = z.object({
   currency: z.string().default("USD"),
   source: z.string().nullable(),
   updated_at: z.string().nullable(),
+  near_mint: z.number().nullable(),
+  lightly_played: z.number().nullable(),
+  moderately_played: z.number().nullable(),
+  product_id: z.string().nullable(),
+  marketplace_url: z.string().url().nullable(),
+  printing_name: z.string().nullable(),
   price_status: z.enum(["available", "unavailable"]),
 });
 
@@ -55,6 +61,8 @@ export const healthResponseSchema = z.object({
       ready: z.boolean(),
       priced_card_count: z.number().int().nonnegative(),
       mode: z.string(),
+      direct_links_ready: z.boolean(),
+      condition_prices_ready: z.boolean(),
     }),
     custom_onnx_models: z.boolean(),
   }),

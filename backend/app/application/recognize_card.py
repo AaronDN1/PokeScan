@@ -171,9 +171,17 @@ class RecognizeCard:
         status = self._confidence.classify(ranked)
 
         started = perf_counter()
+        selected_price = (
+            await self._prices.get_price(ranked[0].card)
+            if ranked and status is not RecognitionStatus.UNRECOGNIZED
+            else Price(amount=None)
+        )
         priced_items = [
-            PricedCandidate(evidence=item, price=await self._prices.get_price(item.card))
-            for item in ranked[:3]
+            PricedCandidate(
+                evidence=item,
+                price=selected_price if index == 0 else Price(amount=None),
+            )
+            for index, item in enumerate(ranked[:3])
         ]
         timings["price_lookup"] = self._elapsed(started)
         priced = tuple(priced_items)

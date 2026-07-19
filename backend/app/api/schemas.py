@@ -16,6 +16,12 @@ class PriceResponse(BaseModel):
     currency: str
     source: str | None
     updated_at: datetime | None
+    near_mint: float | None
+    lightly_played: float | None
+    moderately_played: float | None
+    product_id: str | None
+    marketplace_url: str | None
+    printing_name: str | None
     price_status: str
 
     @classmethod
@@ -26,7 +32,25 @@ class PriceResponse(BaseModel):
             currency=price.currency,
             source=price.source,
             updated_at=price.updated_at,
-            price_status="available" if price.amount is not None else "unavailable",
+            near_mint=price.near_mint,
+            lightly_played=price.lightly_played,
+            moderately_played=price.moderately_played,
+            product_id=price.product_id,
+            marketplace_url=price.marketplace_url,
+            printing_name=price.printing_name,
+            price_status=(
+                "available"
+                if any(
+                    amount is not None
+                    for amount in (
+                        price.amount,
+                        price.near_mint,
+                        price.lightly_played,
+                        price.moderately_played,
+                    )
+                )
+                else "unavailable"
+            ),
         )
 
 
@@ -56,7 +80,7 @@ class CardResponse(BaseModel):
             rarity=card.rarity,
             language=card.language,
             image_url=card.image_url,
-            marketplace_url=card.marketplace_url,
+            marketplace_url=price.marketplace_url or card.marketplace_url,
             price=PriceResponse.from_domain(price),
         )
 
@@ -123,11 +147,13 @@ class CatalogCapability(BaseModel):
 
 
 class PricingCapability(BaseModel):
-    """Cached pricing coverage; missing prices never disable recognition."""
+    """Marketplace coverage and optional official condition-pricing access."""
 
     ready: bool
     priced_card_count: int = Field(ge=0)
     mode: str
+    direct_links_ready: bool
+    condition_prices_ready: bool
 
 
 class HealthCapabilities(BaseModel):

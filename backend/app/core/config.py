@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     candidate_limit: int = 8
     auto_create_schema: bool = True
     development_diagnostics: bool = False
+    pokemon_tcg_api_key: str | None = None
+    tcgplayer_public_key: str | None = None
+    tcgplayer_private_key: str | None = None
+    tcgplayer_api_version: str = "v1.39.0"
+    marketplace_cache_hours: int = 12
     ocr_backend: str = Field(
         default="paddle",
         validation_alias=AliasChoices("OCR_BACKEND", "POKELENS_OCR_BACKEND"),

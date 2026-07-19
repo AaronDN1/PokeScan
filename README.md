@@ -91,7 +91,31 @@ ARTWORK_MATCHER_BACKEND=composite
 CUSTOM_ONNX_MODELS_REQUIRED=false
 POKELENS_DATABASE_URL=sqlite+aiosqlite:///./data/pokelens.db
 POKELENS_CORS_ORIGINS=["http://localhost:5173"]
+# Optional: raises PokÃ©mon TCG API request limits for exact TCGplayer mapping.
+POKELENS_POKEMON_TCG_API_KEY=
+# Optional: existing approved TCGplayer credentials enable NM/LP/MP market prices.
+POKELENS_TCGPLAYER_PUBLIC_KEY=
+POKELENS_TCGPLAYER_PRIVATE_KEY=
+POKELENS_MARKETPLACE_CACHE_HOURS=12
 ```
+
+Exact TCGplayer product links and the public overall-market fallback work without
+private credentials. Near Mint, Lightly Played, and Moderately Played prices are
+official SKU-level TCGplayer market prices and require an existing approved
+TCGplayer API account. TCGplayer's current documentation says it is not granting
+new API access; PokÃ©Lens does not scrape the marketplace or fabricate condition
+prices when credentials are absent. Marketplace enrichment is cached and cannot
+make an otherwise successful recognition fail.
+
+If you already have approved TCGplayer credentials, create the backend environment
+file before starting the app, then fill in its two key values:
+
+```powershell
+Copy-Item backend\.env.example backend\.env
+```
+
+The root `.env.local` configures the web app; `backend\.env` configures the Python
+recognition API. Neither file starts a process on its own.
 
 Future custom adapters remain selectable with `OCR_BACKEND=onnx_ctc`, `ARTWORK_MATCHER_BACKEND=onnx_embedding`, and `CUSTOM_ONNX_MODELS_REQUIRED=true` after supplying the documented custom files.
 

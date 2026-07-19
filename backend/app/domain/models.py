@@ -17,12 +17,18 @@ class RecognitionStatus(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class Price:
-    """A cached marketplace price."""
+    """Cached marketplace data for one exact card printing."""
 
     amount: float | None
     currency: str = "USD"
     source: str | None = None
     updated_at: datetime | None = None
+    near_mint: float | None = None
+    lightly_played: float | None = None
+    moderately_played: float | None = None
+    product_id: str | None = None
+    marketplace_url: str | None = None
+    printing_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

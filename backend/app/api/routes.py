@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated, cast
 
 from fastapi import APIRouter, File, HTTPException, Query, Request, Response, UploadFile, status
-from sqlalchemy import func, select, text
+from sqlalchemy import func, or_, select, text, union
 
 from app.api.schemas import (
     CardResponse,
@@ -18,7 +18,7 @@ from app.api.schemas import (
     RecognitionResponse,
 )
 from app.core.container import Container
-from app.infrastructure.database.models import PriceRecord
+from app.infrastructure.database.models import PriceRecord, TcgPlayerQuoteRecord
 
 router = APIRouter()
 
@@ -73,7 +73,7 @@ async def get_card(card_id: str, request: Request) -> CardResponse:
 
 @router.get("/api/v1/prices/{card_id}", response_model=PriceResponse)
 async def get_price(card_id: str, request: Request) -> PriceResponse:
-    """Return the latest cached price without calling a marketplace inline."""
+    """Return cached marketplace data, refreshing it when stale and available."""
     container = _container(request)
     card = await container.cards.get(card_id)
     if not card:
@@ -102,8 +102,19 @@ async def health(request: Request) -> HealthResponse:
     try:
         async with container.sessions() as session:
             await session.execute(text("SELECT 1"))
+            priced_ids = union(
+                select(PriceRecord.card_id).where(PriceRecord.amount.is_not(None)),
+                select(TcgPlayerQuoteRecord.card_id).where(
+                    or_(
+                        TcgPlayerQuoteRecord.market_price.is_not(None),
+                        TcgPlayerQuoteRecord.near_mint.is_not(None),
+                        TcgPlayerQuoteRecord.lightly_played.is_not(None),
+                        TcgPlayerQuoteRecord.moderately_played.is_not(None),
+                    )
+                ),
+            ).subquery()
             priced_card_count = int(
-                await session.scalar(select(func.count(PriceRecord.card_id))) or 0
+                await session.scalar(select(func.count()).select_from(priced_ids)) or 0
             )
     except Exception:
         database_status = "unavailable"
@@ -135,7 +146,13 @@ async def health(request: Request) -> HealthResponse:
             pricing=PricingCapability(
                 ready=database_status == "ready",
                 priced_card_count=priced_card_count,
-                mode="cached_optional",
+                mode=(
+                    "official_tcgplayer_api"
+                    if container.prices.official_condition_pricing_available
+                    else "direct_links_and_public_market"
+                ),
+                direct_links_ready=True,
+                condition_prices_ready=container.prices.official_condition_pricing_available,
             ),
             custom_onnx_models=container.settings.custom_onnx_models_required,
         ),

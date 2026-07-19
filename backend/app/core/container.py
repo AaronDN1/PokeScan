@@ -17,12 +17,16 @@ from app.infrastructure.database.models import Base
 from app.infrastructure.database.repositories import (
     SqlAlchemyCardRepository,
     SqlAlchemyFeedbackRepository,
-    SqlAlchemyPriceProvider,
 )
 from app.infrastructure.imaging.opencv_locator import OpenCvCardLocator
 from app.infrastructure.imaging.orientation import OcrOrientationResolver
 from app.infrastructure.imaging.regions import RegionCrops
 from app.infrastructure.imaging.validator import PillowImageValidator
+from app.infrastructure.marketplace.provider import CachedMarketplacePriceProvider
+from app.infrastructure.marketplace.tcgplayer import (
+    PokemonTcgMarketplaceResolver,
+    TcgPlayerConditionClient,
+)
 from app.infrastructure.models.composite_artwork import CompositeArtworkMatcher
 from app.infrastructure.models.onnx_artwork import OnnxArtworkMatcher
 from app.infrastructure.models.onnx_ocr import OnnxCtcOcrEngine
@@ -63,7 +67,16 @@ class Container:
         self.engine: AsyncEngine = create_async_engine(settings.database_url, pool_pre_ping=True)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         self.cards = SqlAlchemyCardRepository(self.sessions)
-        self.prices = SqlAlchemyPriceProvider(self.sessions)
+        self.prices = CachedMarketplacePriceProvider(
+            self.sessions,
+            PokemonTcgMarketplaceResolver(api_key=settings.pokemon_tcg_api_key),
+            TcgPlayerConditionClient(
+                public_key=settings.tcgplayer_public_key,
+                private_key=settings.tcgplayer_private_key,
+                api_version=settings.tcgplayer_api_version,
+            ),
+            cache_hours=settings.marketplace_cache_hours,
+        )
         self.feedback = SqlAlchemyFeedbackRepository(self.sessions)
         self.rate_limiter = RecognitionRateLimiter(
             limit=settings.recognition_rate_limit_per_minute,
@@ -171,4 +184,5 @@ class Container:
     async def close(self) -> None:
         """Release database and cache resources."""
         await self.rate_limiter.close()
+        await self.prices.close()
         await self.engine.dispose()

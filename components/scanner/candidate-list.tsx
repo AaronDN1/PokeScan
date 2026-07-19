@@ -32,11 +32,6 @@ export function CandidateList({ result, onReset }: CandidateListProps) {
             <h3 className="mt-3 truncate text-[14px] font-semibold text-white">{card.name}</h3>
             <p className="mt-0.5 truncate text-[12px] text-[#7f8997]">{card.set_name} · {card.collector_number}</p>
             <p className="mt-2 text-[11px] font-medium text-[#8dbaff]">{Math.round(confidence * 100)}% match</p>
-            {card.marketplace_url ? (
-              <a className="mt-2 block text-[11px] text-[#aab8ca] underline" href={card.marketplace_url} target="_blank" rel="noreferrer">
-                Marketplace listing
-              </a>
-            ) : null}
           </article>
         ))}
       </div> : null}

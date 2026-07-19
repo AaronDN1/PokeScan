@@ -37,9 +37,14 @@ test("renders optional pricing and marketplace data honestly", async () => {
     readFile(new URL("components/scanner/candidate-list.tsx", root), "utf8"),
   ]);
   assert.match(contracts, /price_status/);
+  assert.match(contracts, /near_mint/);
+  assert.match(contracts, /lightly_played/);
+  assert.match(contracts, /moderately_played/);
   assert.match(contracts, /marketplace_url: z\.string\(\)\.url\(\)\.nullable\(\)/);
   assert.match(resultCard, /card\.marketplace_url \?/);
-  assert.match(candidates, /card\.marketplace_url \?/);
+  assert.match(resultCard, /Open in TCGplayer/);
+  assert.match(resultCard, /not endorsed or certified by TCGplayer/);
+  assert.doesNotMatch(candidates, /card\.marketplace_url \?/);
 });
 
 test("does not retain uploaded card images in browser storage", async () => {
