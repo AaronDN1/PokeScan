@@ -36,7 +36,7 @@ export function ScanProgress({ previewUrl, stage, onCancel }: ScanProgressProps)
             Analyzing photo
           </div>
           <h2 className="text-[26px] font-semibold tracking-[-0.03em] text-white sm:text-[30px]">Finding the exact match</h2>
-          <p className="mt-2 text-[14px] leading-6 text-[#8f9aa8]">Usually done in under a second on healthy infrastructure.</p>
+          <p className="mt-2 text-[14px] leading-6 text-[#8f9aa8]">CPU recognition can take several seconds while OCR and artwork matching run.</p>
 
           <ol className="mt-7 space-y-4">
             {stages.map((item, index) => {

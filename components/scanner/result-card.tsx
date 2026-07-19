@@ -71,15 +71,17 @@ export function ResultCard({ result, onReset }: ResultCardProps) {
             </div>
 
             <div className="mt-auto grid gap-3 pt-8">
-              <a
-                href={card.marketplace_url}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-[12px] bg-[#f2f6fc] px-5 text-[14px] font-semibold text-[#0a0e14] transition-colors hover:bg-white"
-              >
-                View on TCGplayer
-                <ArrowUpRight aria-hidden="true" className="h-4 w-4" />
-              </a>
+              {card.marketplace_url ? (
+                <a
+                  href={card.marketplace_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex min-h-12 items-center justify-center gap-2 rounded-[12px] bg-[#f2f6fc] px-5 text-[14px] font-semibold text-[#0a0e14] transition-colors hover:bg-white"
+                >
+                  View marketplace listing
+                  <ArrowUpRight aria-hidden="true" className="h-4 w-4" />
+                </a>
+              ) : null}
               <Button variant="secondary" onClick={onReset}>
                 <RotateCcw aria-hidden="true" className="h-4 w-4" />
                 Scan another card
@@ -88,7 +90,7 @@ export function ResultCard({ result, onReset }: ResultCardProps) {
 
             <p className="mt-5 flex items-center justify-center gap-1.5 text-[11px] text-[#697482]">
               <ShieldCheck aria-hidden="true" className="h-3.5 w-3.5" />
-              Artwork and printed details independently verified
+              Text and artwork evidence independently checked
             </p>
           </div>
         </div>

@@ -13,6 +13,7 @@ import { ApiError, getHealth, recognizeCard } from "@/lib/api";
 import type { ScanStage } from "@/lib/contracts";
 
 const MAX_UPLOAD_BYTES = 12 * 1024 * 1024;
+const SUPPORTED_IMAGE_EXTENSION = /\.(?:heic|heif|jfif|jpe?g|mpo|png|webp)$/i;
 const stageOrder: ScanStage[] = ["preparing", "locating", "reading", "matching"];
 
 export function ScannerApp() {
@@ -27,16 +28,13 @@ export function ScannerApp() {
     retry: 1,
     refetchInterval: 30_000,
   });
-  const scannerReady =
-    healthQuery.data?.status === "ready" &&
-    healthQuery.data.database === "ready" &&
-    healthQuery.data.models === "ready";
+  const scannerReady = healthQuery.data?.recognition_ready === true;
   const scannerStatus = healthQuery.isPending
     ? "Checking scanner"
     : scannerReady
-      ? "Scanner ready"
-      : healthQuery.data?.models === "artifacts_required"
-        ? "Models required"
+      ? `Scanner ready · ${(healthQuery.data?.capabilities.catalog.card_count ?? 0).toLocaleString()} cards`
+      : healthQuery.data
+        ? "Scanner setup needed"
         : "Scanner offline";
 
   const mutation = useMutation({
@@ -53,6 +51,9 @@ export function ScannerApp() {
 
   useEffect(() => () => {
     abortRef.current?.abort();
+  }, []);
+
+  useEffect(() => () => {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
   }, [previewUrl]);
 
@@ -68,8 +69,8 @@ export function ScannerApp() {
 
   const selectFile = (file: File) => {
     setValidationError(null);
-    if (!file.type.startsWith("image/")) {
-      setValidationError("Choose a JPEG, PNG, WebP, or HEIC image.");
+    if (!file.type.startsWith("image/") && !SUPPORTED_IMAGE_EXTENSION.test(file.name)) {
+      setValidationError("Choose a JPEG, PNG, WebP, HEIC, HEIF, or MPO image.");
       return;
     }
     if (file.size > MAX_UPLOAD_BYTES) {
@@ -90,8 +91,10 @@ export function ScannerApp() {
   const errorMessage = validationError ?? (
     mutation.error instanceof ApiError
       ? mutation.error.message
-      : mutation.error
-        ? "Something went wrong while analyzing the photo. Please try again."
+      : mutation.error instanceof Error
+        ? mutation.error.message
+        : mutation.error
+          ? "Something went wrong while analyzing the photo. Please try again."
         : null
   );
 
@@ -136,9 +139,10 @@ export function ScannerApp() {
 
         {!healthQuery.isPending && !scannerReady && mutation.isIdle ? (
           <div className="mt-4 rounded-[14px] border border-white/[0.07] bg-white/[0.025] px-4 py-3 text-center text-[12px] leading-5 text-[#7f8997]">
-            {healthQuery.data?.models === "artifacts_required"
-              ? "The API is online, but benchmark-approved model artifacts must be installed before scanning."
-              : "This frontend is ready for review. Connect the production recognition API to enable scanning."}
+            {healthQuery.data?.issues[0] ??
+              (healthQuery.error instanceof ApiError
+                ? healthQuery.error.message
+                : "Connect and bootstrap the FastAPI recognition service to enable scanning.")}
           </div>
         ) : null}
 

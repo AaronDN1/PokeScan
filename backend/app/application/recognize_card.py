@@ -2,19 +2,27 @@
 
 from __future__ import annotations
 
+import base64
 from dataclasses import replace
 from time import perf_counter
 from uuid import uuid4
 
+import structlog
+
 from app.application.confidence import WeightedConfidenceEngine
 from app.application.normalization import (
+    collector_number_alternatives,
     collector_similarity,
+    name_alternatives,
     name_similarity,
     normalize_card_name,
     normalize_collector_number,
+    suffix_similarity,
 )
 from app.domain.models import (
+    ArtworkEvidence,
     CandidateEvidence,
+    OrientationResult,
     Price,
     PricedCandidate,
     RecognitionResult,
@@ -25,20 +33,22 @@ from app.domain.ports import (
     CardLocator,
     CardRepository,
     ImageValidator,
-    OcrEngine,
+    OrientationResolver,
     PriceProvider,
 )
 
+logger = structlog.get_logger()
+
 
 class RecognizeCard:
-    """Coordinate one deterministic recognition pass across replaceable ports."""
+    """Coordinate one bounded recognition pass across replaceable ports."""
 
     def __init__(
         self,
         *,
         validator: ImageValidator,
         locator: CardLocator,
-        ocr: OcrEngine,
+        orientation: OrientationResolver,
         cards: CardRepository,
         artwork: ArtworkMatcher,
         prices: PriceProvider,
@@ -47,53 +57,133 @@ class RecognizeCard:
     ) -> None:
         self._validator = validator
         self._locator = locator
-        self._ocr = ocr
+        self._orientation = orientation
         self._cards = cards
         self._artwork = artwork
         self._prices = prices
         self._confidence = confidence
         self._candidate_limit = candidate_limit
 
-    async def execute(self, *, payload: bytes, declared_mime: str) -> RecognitionResult:
-        """Identify one card while keeping pricing and candidates bounded."""
+    async def execute(
+        self,
+        *,
+        payload: bytes,
+        declared_mime: str,
+        include_diagnostics: bool = False,
+    ) -> RecognitionResult:
+        """Identify one card while keeping candidates and price reads bounded."""
+        total_started = perf_counter()
+        timings: dict[str, float] = {}
+
         started = perf_counter()
         safe_payload = self._validator.validate(payload, declared_mime)
-        normalized_image = self._locator.normalize(safe_payload)
+        timings["validation"] = self._elapsed(started)
 
-        name_reading = self._ocr.read_name(normalized_image.top_region_jpeg)
-        number_reading = self._ocr.read_collector_number(normalized_image.bottom_region_jpeg)
+        started = perf_counter()
+        localized = self._locator.normalize(safe_payload)
+        timings["localization_and_warp"] = self._elapsed(started)
+        timings["localization"] = localized.localization_ms
+        timings["perspective_correction"] = localized.perspective_correction_ms
+
+        started = perf_counter()
+        orientation = self._orientation.resolve(localized)
+        timings["orientation"] = self._elapsed(started)
+        timings["name_ocr"] = orientation.name_ocr_ms
+        timings["collector_ocr"] = orientation.collector_ocr_ms
+
+        name_reading = orientation.name
+        number_reading = orientation.collector_number
         normalized_name = normalize_card_name(name_reading.text) or None
         collector_number = normalize_collector_number(number_reading.text)
+        possible_names = name_alternatives(name_reading.text)
+        possible_numbers = collector_number_alternatives(number_reading.text)
 
+        started = perf_counter()
         candidates = await self._cards.search(
             normalized_name=normalized_name,
             collector_number=collector_number,
+            name_alternatives=possible_names,
+            collector_alternatives=possible_numbers,
             limit=self._candidate_limit,
         )
-        ocr_quality = max(0.0, min(1.0, (name_reading.confidence + number_reading.confidence) / 2))
+        timings["candidate_retrieval"] = self._elapsed(started)
 
+        started = perf_counter()
+        visual_scores = self._artwork.score_many(
+            orientation.image.artwork_region_jpeg, candidates
+        )
+        timings["artwork_matching"] = self._elapsed(started)
+
+        ocr_quality = max(
+            0.0,
+            min(1.0, (name_reading.confidence + number_reading.confidence) / 2),
+        )
+        blur_quality = max(0.0, min(1.0, orientation.image.blur_score / 180.0))
         ranked: list[CandidateEvidence] = []
         for card in candidates:
+            visual = visual_scores.get(card.id, ArtworkEvidence())
+            collector_score = max(
+                (
+                    collector_similarity(item, card.normalized_collector_number)
+                    for item in possible_numbers
+                    or ((collector_number,) if collector_number else ())
+                ),
+                default=0.0,
+            )
+            observed_names = possible_names or ((normalized_name,) if normalized_name else ())
+            name_score = max(
+                (name_similarity(item, card.normalized_name) for item in observed_names),
+                default=0.0,
+            )
+            suffix_score = max(
+                (suffix_similarity(item, card.normalized_name) for item in observed_names),
+                default=0.0,
+            )
             evidence = CandidateEvidence(
                 card=card,
-                collector_score=collector_similarity(collector_number, card.collector_number),
-                name_score=name_similarity(normalized_name, card.normalized_name),
-                artwork_score=self._artwork.score(normalized_image.artwork_region_jpeg, card),
+                collector_score=collector_score,
+                name_score=name_score,
+                artwork_score=visual.combined_score,
                 ocr_quality=ocr_quality,
+                suffix_score=suffix_score,
+                localization_quality=orientation.image.localization_score,
+                blur_quality=blur_quality,
+                perceptual_hash_score=visual.perceptual_hash_score,
+                orb_score=visual.orb_score,
+                embedding_score=visual.embedding_score,
             )
             ranked.append(replace(evidence, confidence=self._confidence.score(evidence)))
 
         ranked.sort(key=lambda item: item.confidence, reverse=True)
-        status = self._confidence.classify([item.confidence for item in ranked])
-        priced_items: list[PricedCandidate] = []
-        for item in ranked[:3]:
-            priced_items.append(
-                PricedCandidate(evidence=item, price=await self._prices.get_price(item.card))
-            )
+        status = self._confidence.classify(ranked)
+
+        started = perf_counter()
+        priced_items = [
+            PricedCandidate(evidence=item, price=await self._prices.get_price(item.card))
+            for item in ranked[:3]
+        ]
+        timings["price_lookup"] = self._elapsed(started)
         priced = tuple(priced_items)
         selected = priced[0] if status is RecognitionStatus.MATCHED and priced else None
-        message = self._message_for(status)
-
+        processing_ms = round((perf_counter() - total_started) * 1000, 2)
+        timings["total"] = processing_ms
+        diagnostics = (
+            self._diagnostics(
+                orientation=orientation,
+                normalized_name=normalized_name,
+                collector_number=collector_number,
+                ranked=ranked,
+                timings=timings,
+            )
+            if include_diagnostics
+            else None
+        )
+        logger.info(
+            "recognition_timing",
+            status=status.value,
+            candidate_count=len(ranked),
+            **{f"{key}_ms": value for key, value in timings.items()},
+        )
         return RecognitionResult(
             recognition_id=str(uuid4()),
             status=status,
@@ -101,9 +191,56 @@ class RecognizeCard:
             card=selected.evidence.card if selected else None,
             price=selected.price if selected else Price(amount=None),
             candidates=priced,
-            processing_ms=round((perf_counter() - started) * 1000, 2),
-            message=message,
+            processing_ms=processing_ms,
+            message=self._message_for(status),
+            diagnostics=diagnostics,
         )
+
+    @staticmethod
+    def _elapsed(started: float) -> float:
+        return round((perf_counter() - started) * 1000, 2)
+
+    @staticmethod
+    def _diagnostics(
+        *,
+        orientation: OrientationResult,
+        normalized_name: str | None,
+        collector_number: str | None,
+        ranked: list[CandidateEvidence],
+        timings: dict[str, float],
+    ) -> dict[str, object]:
+        image = orientation.image
+        return {
+            "original_size": [image.original_width, image.original_height],
+            "detected_polygon": image.detected_polygon,
+            "normalized_size": [image.width, image.height],
+            "rotation_degrees": image.rotation_degrees,
+            "raw_name_ocr": orientation.name.text,
+            "normalized_name": normalized_name,
+            "name_ocr_confidence": orientation.name.confidence,
+            "raw_collector_ocr": orientation.collector_number.text,
+            "normalized_collector_number": collector_number,
+            "collector_ocr_confidence": orientation.collector_number.confidence,
+            "images": {
+                "normalized_card_jpeg": base64.b64encode(image.card_jpeg).decode("ascii"),
+                "name_crop_jpeg": base64.b64encode(image.top_region_jpeg).decode("ascii"),
+                "collector_crop_jpeg": base64.b64encode(image.bottom_region_jpeg).decode("ascii"),
+            },
+            "candidates": [
+                {
+                    "card_id": item.card.id,
+                    "name_score": item.name_score,
+                    "collector_score": item.collector_score,
+                    "suffix_score": item.suffix_score,
+                    "phash_score": item.perceptual_hash_score,
+                    "orb_score": item.orb_score,
+                    "embedding_score": item.embedding_score,
+                    "final_confidence": item.confidence,
+                }
+                for item in ranked
+            ],
+            "timings_ms": timings,
+        }
 
     @staticmethod
     def _message_for(status: RecognitionStatus) -> str | None:

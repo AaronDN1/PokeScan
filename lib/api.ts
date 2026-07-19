@@ -5,9 +5,31 @@ import {
   type RecognitionResponse,
 } from "@/lib/contracts";
 
-const API_ORIGIN =
-  process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ??
-  (process.env.NODE_ENV === "development" ? "http://localhost:8000" : "");
+const configuredApiOrigin =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? process.env.NEXT_PUBLIC_API_URL;
+
+function resolveApiOrigin(): { origin: string; error: string | null } {
+  const raw = configuredApiOrigin?.trim() ||
+    (process.env.NODE_ENV === "development" ? "http://localhost:8000" : "");
+  if (!raw) {
+    return {
+      origin: "",
+      error: "Set NEXT_PUBLIC_API_BASE_URL to the public FastAPI URL before building the frontend.",
+    };
+  }
+  try {
+    const parsed = new URL(raw);
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error("Unsupported protocol");
+    return { origin: raw.replace(/\/$/, ""), error: null };
+  } catch {
+    return {
+      origin: "",
+      error: "NEXT_PUBLIC_API_BASE_URL must be an absolute http:// or https:// URL.",
+    };
+  }
+}
+
+const apiConfiguration = resolveApiOrigin();
 
 export class ApiError extends Error {
   constructor(
@@ -21,12 +43,13 @@ export class ApiError extends Error {
 }
 
 export async function recognizeCard(image: File, signal?: AbortSignal): Promise<RecognitionResponse> {
+  if (apiConfiguration.error) throw new ApiError(apiConfiguration.error, 503, "api_url_invalid");
   const body = new FormData();
   body.append("image", image, image.name || "card-photo.jpg");
 
   let response: Response;
   try {
-    response = await fetch(`${API_ORIGIN}/api/v1/recognitions`, {
+    response = await fetch(`${apiConfiguration.origin}/api/v1/recognitions`, {
       method: "POST",
       body,
       signal,
@@ -47,11 +70,21 @@ export async function recognizeCard(image: File, signal?: AbortSignal): Promise<
 }
 
 export async function getHealth(signal?: AbortSignal): Promise<HealthResponse> {
-  const response = await fetch(`${API_ORIGIN}/health`, {
-    signal,
-    cache: "no-store",
-    headers: { Accept: "application/json" },
-  });
+  if (apiConfiguration.error) throw new ApiError(apiConfiguration.error, 503, "api_url_invalid");
+  let response: Response;
+  try {
+    response = await fetch(`${apiConfiguration.origin}/health`, {
+      signal,
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
+  } catch {
+    throw new ApiError(
+      `The recognition API at ${apiConfiguration.origin} could not be reached.`,
+      503,
+      "backend_offline",
+    );
+  }
   if (!response.ok) throw new ApiError("The recognition service is offline.", response.status);
   return healthResponseSchema.parse(await response.json());
 }

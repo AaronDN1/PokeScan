@@ -1,5 +1,9 @@
 # Recognition benchmark data
 
-Benchmark images are not committed to avoid redistributing card artwork and user photographs. Place consented, licensed data under versioned dataset directories such as `v1/images/`, with a `manifest.jsonl` containing only relative paths, expected card IDs, capture conditions, and consent/license provenance.
+Copy `manifest.example.json` to `manifest.json`, place consented real photographs under `photos/`, and map each relative path to its exact imported TCGdex card ID. Photos and generated results are ignored by Git.
 
-The benchmark runner and promotion gates are documented in `../../docs/benchmarks.md`. Never use production uploads as training or benchmark data unless a user explicitly opts in.
+```bash
+python scripts/benchmark_recognition.py --manifest benchmarks/manifest.json --output benchmarks/results.json
+```
+
+The report includes localization, exact name/collector OCR, top-1/top-3 card accuracy, false-confident, ambiguous and unrecognized rates, plus median and p95 latency. Do not use production uploads without explicit user consent.

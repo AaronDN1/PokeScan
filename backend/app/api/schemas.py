@@ -16,19 +16,17 @@ class PriceResponse(BaseModel):
     currency: str
     source: str | None
     updated_at: datetime | None
+    price_status: str
 
     @classmethod
     def from_domain(cls, price: Price) -> PriceResponse:
         """Map a domain price to its wire representation."""
-        return (
-            cls(**price.__dict__)
-            if hasattr(price, "__dict__")
-            else cls(
-                amount=price.amount,
-                currency=price.currency,
-                source=price.source,
-                updated_at=price.updated_at,
-            )
+        return cls(
+            amount=price.amount,
+            currency=price.currency,
+            source=price.source,
+            updated_at=price.updated_at,
+            price_status="available" if price.amount is not None else "unavailable",
         )
 
 
@@ -43,7 +41,7 @@ class CardResponse(BaseModel):
     rarity: str | None
     language: str
     image_url: str
-    marketplace_url: str
+    marketplace_url: str | None
     price: PriceResponse
 
     @classmethod
@@ -90,6 +88,7 @@ class RecognitionResponse(BaseModel):
     candidates: list[CandidateResponse]
     processing_ms: float = Field(ge=0)
     message: str | None
+    diagnostics: dict[str, object] | None = None
 
     @classmethod
     def from_domain(cls, result: RecognitionResult) -> RecognitionResponse:
@@ -102,6 +101,7 @@ class RecognitionResponse(BaseModel):
             candidates=[CandidateResponse.from_domain(item) for item in result.candidates],
             processing_ms=result.processing_ms,
             message=result.message,
+            diagnostics=result.diagnostics,
         )
 
 
@@ -114,10 +114,39 @@ class FeedbackRequest(BaseModel):
     is_correct: bool
 
 
+class CatalogCapability(BaseModel):
+    """Catalog readiness reported independently from API liveness."""
+
+    ready: bool
+    card_count: int = Field(ge=0)
+    source: str
+
+
+class PricingCapability(BaseModel):
+    """Cached pricing coverage; missing prices never disable recognition."""
+
+    ready: bool
+    priced_card_count: int = Field(ge=0)
+    mode: str
+
+
+class HealthCapabilities(BaseModel):
+    """Machine-readable capability state used by the web application."""
+
+    card_localization: dict[str, object]
+    ocr: dict[str, object]
+    artwork_matching: dict[str, object]
+    catalog: CatalogCapability
+    pricing: PricingCapability
+    custom_onnx_models: bool
+
+
 class HealthResponse(BaseModel):
     """Operational readiness without leaking credentials or filesystem paths."""
 
     status: str
     version: str
     database: str
-    models: str
+    recognition_ready: bool
+    capabilities: HealthCapabilities
+    issues: list[str]

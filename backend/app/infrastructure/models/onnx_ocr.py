@@ -65,7 +65,7 @@ class _CtcRecognizer:
             canvas = Image.new("L", (target_width, target_height), color=255)
             canvas.paste(resized, (0, (target_height - resized.height) // 2))
             array = np.asarray(canvas, dtype=np.float32) / 127.5 - 1.0
-            return array[None, None, :, :]
+            return np.asarray(array[None, None, :, :], dtype=np.float32)
 
     @staticmethod
     def _softmax(values: FloatArray) -> FloatArray:

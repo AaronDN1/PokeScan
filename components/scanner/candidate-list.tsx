@@ -18,19 +18,21 @@ export function CandidateList({ result, onReset }: CandidateListProps) {
 
       <div className="mt-7 grid gap-3 sm:grid-cols-3">
         {result.candidates.slice(0, 3).map(({ card, confidence }) => (
-          <a
+          <article
             key={card.id}
-            href={card.marketplace_url}
-            target="_blank"
-            rel="noreferrer"
-            className="group rounded-[16px] border border-white/[0.08] bg-white/[0.025] p-3 transition-colors hover:border-white/[0.17] hover:bg-white/[0.05]"
+            className="rounded-[16px] border border-white/[0.08] bg-white/[0.025] p-3"
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={card.image_url} alt="" className="aspect-[3/4] w-full rounded-[10px] bg-black object-contain" />
             <h3 className="mt-3 truncate text-[14px] font-semibold text-white">{card.name}</h3>
             <p className="mt-0.5 truncate text-[12px] text-[#7f8997]">{card.set_name} · {card.collector_number}</p>
             <p className="mt-2 text-[11px] font-medium text-[#8dbaff]">{Math.round(confidence * 100)}% match</p>
-          </a>
+            {card.marketplace_url ? (
+              <a className="mt-2 block text-[11px] text-[#aab8ca] underline" href={card.marketplace_url} target="_blank" rel="noreferrer">
+                Marketplace listing
+              </a>
+            ) : null}
+          </article>
         ))}
       </div>
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from io import BytesIO
 from pathlib import Path
 
@@ -10,7 +11,7 @@ import onnxruntime as ort
 from numpy.typing import NDArray
 from PIL import Image
 
-from app.domain.models import Card
+from app.domain.models import ArtworkEvidence, Card
 
 FloatArray = NDArray[np.float32]
 
@@ -26,6 +27,25 @@ class OnnxArtworkMatcher:
         """Return zero when an artifact is missing so text alone cannot overclaim."""
         if not card.visual_embedding or not self._model_path.is_file():
             return 0.0
+        observed = self._embed(artwork_jpeg)
+        return self._cosine_score(observed, card.visual_embedding)
+
+    def score_many(
+        self, artwork_jpeg: bytes, cards: Sequence[Card]
+    ) -> dict[str, ArtworkEvidence]:
+        """Run the custom embedding model once and compare bounded candidates."""
+        if not self._model_path.is_file():
+            return {card.id: ArtworkEvidence() for card in cards}
+        observed = self._embed(artwork_jpeg)
+        return {
+            card.id: ArtworkEvidence(
+                embedding_score=self._cosine_score(observed, card.visual_embedding),
+                combined_score=self._cosine_score(observed, card.visual_embedding),
+            )
+            for card in cards
+        }
+
+    def _embed(self, artwork_jpeg: bytes) -> FloatArray:
         if self._session is None:
             self._session = ort.InferenceSession(
                 str(self._model_path), providers=["CPUExecutionProvider"]
@@ -34,8 +54,15 @@ class OnnxArtworkMatcher:
         output = np.asarray(
             self._session.run(None, {input_name: self._preprocess(artwork_jpeg)})[0]
         )
-        observed = output.reshape(-1).astype(np.float32)
-        expected = np.asarray(card.visual_embedding, dtype=np.float32)
+        return np.asarray(output.reshape(-1), dtype=np.float32)
+
+    @staticmethod
+    def _cosine_score(
+        observed: FloatArray, expected_values: tuple[float, ...] | None
+    ) -> float:
+        if not expected_values:
+            return 0.0
+        expected = np.asarray(expected_values, dtype=np.float32)
         if observed.size != expected.size:
             return 0.0
         denominator = float(np.linalg.norm(observed) * np.linalg.norm(expected))
