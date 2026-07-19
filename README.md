@@ -159,4 +159,19 @@ For a bounded Docker smoke catalog, override the setup command with `python scri
 
 See [architecture](docs/architecture.md), [pipeline](docs/recognition-pipeline.md), [API](docs/api.md), [database](docs/database.md), [benchmarks](docs/benchmarks.md), [deployment](docs/deployment.md), and [security](docs/security.md).
 
+## Free hosting for mobile testing
+
+GitHub Pages can host only a static frontend; it cannot run this project's
+Python/OpenCV/ONNX recognition API. The supported no-cost test layout is:
+
+- the existing Sites deployment for the web app;
+- a public Hugging Face Docker Space for the recognition API; and
+- GitHub for source control and the manual deployment workflow.
+
+The backend deployment is intentionally manual so a normal push cannot trigger
+an expensive full-catalog image rebuild. See [deployment](docs/deployment.md) for
+the one-time Hugging Face token and repository-variable setup. Free hardware may
+sleep after inactivity, so the first mobile scan after a long idle period can
+take longer while the service wakes.
+
 Pokémon and related marks belong to their respective owners. This project is not affiliated with or endorsed by Nintendo, Creatures, GAME FREAK, The Pokémon Company, TCGdex, or TCGplayer.
