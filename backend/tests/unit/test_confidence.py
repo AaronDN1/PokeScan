@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from app.application.confidence import ConfidenceThresholds, WeightedConfidenceEngine
 from app.domain.models import CandidateEvidence, Card, RecognitionStatus
 
@@ -36,3 +38,61 @@ def test_refuses_close_high_scoring_candidates() -> None:
     assert engine.classify([0.9, 0.86]) is RecognitionStatus.AMBIGUOUS
     assert engine.classify([0.9, 0.7]) is RecognitionStatus.MATCHED
     assert engine.classify([0.4]) is RecognitionStatus.UNRECOGNIZED
+
+
+def test_accepts_a_clear_full_card_visual_winner_when_ocr_is_missing() -> None:
+    engine = WeightedConfidenceEngine()
+    top = CandidateEvidence(
+        _card(),
+        collector_score=0.0,
+        name_score=0.0,
+        artwork_score=0.91,
+        ocr_quality=0.0,
+        perceptual_hash_score=0.9,
+        orb_score=0.72,
+        embedding_score=0.93,
+    )
+    runner_up = replace(
+        top,
+        card=replace(_card(), id="runner-up"),
+        artwork_score=0.71,
+        orb_score=0.24,
+        embedding_score=0.82,
+    )
+    ranked = [
+        replace(top, confidence=engine.score(top)),
+        replace(runner_up, confidence=engine.score(runner_up)),
+    ]
+
+    assert engine.classify(ranked) is RecognitionStatus.MATCHED
+
+
+def test_clear_visual_winner_can_override_unrelated_ocr_noise() -> None:
+    engine = WeightedConfidenceEngine()
+    top = CandidateEvidence(
+        _card(),
+        collector_score=0.0,
+        name_score=0.18,
+        suffix_score=1.0,
+        artwork_score=0.97,
+        ocr_quality=0.58,
+        localization_quality=0.8,
+        blur_quality=0.2,
+        perceptual_hash_score=0.97,
+        orb_score=1.0,
+        embedding_score=0.96,
+    )
+    runner_up = replace(
+        top,
+        card=replace(_card(), id="runner-up"),
+        artwork_score=0.72,
+        orb_score=0.16,
+        embedding_score=0.86,
+    )
+    ranked = [
+        replace(top, confidence=engine.score(top)),
+        replace(runner_up, confidence=engine.score(runner_up)),
+    ]
+
+    assert ranked[0].confidence < engine.thresholds.matched
+    assert engine.classify(ranked) is RecognitionStatus.MATCHED

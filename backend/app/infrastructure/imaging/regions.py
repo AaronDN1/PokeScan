@@ -20,7 +20,7 @@ class RegionCrops:
     """Relative left, top, right, bottom crop coordinates."""
 
     name: CropBox = (0.035, 0.025, 0.78, 0.155)
-    collector: CropBox = (0.48, 0.82, 0.995, 0.985)
+    collector: CropBox = (0.0, 0.88, 1.0, 0.995)
     artwork: CropBox = (0.055, 0.135, 0.945, 0.675)
 
 

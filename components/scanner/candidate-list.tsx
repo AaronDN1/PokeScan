@@ -10,13 +10,18 @@ interface CandidateListProps {
 }
 
 export function CandidateList({ result, onReset }: CandidateListProps) {
+  const hasCandidates = result.candidates.length > 0;
   return (
     <section className="rounded-[24px] border border-white/[0.09] bg-[#0d1118] p-5 shadow-[0_24px_80px_rgba(0,0,0,0.28)] sm:p-8" aria-live="polite">
-      <span className="text-[12px] font-semibold uppercase tracking-[0.16em] text-[#e1bd71]">Needs confirmation</span>
-      <h2 className="mt-3 text-[28px] font-semibold tracking-[-0.035em] text-white">A few cards look similar</h2>
+      <span className="text-[12px] font-semibold uppercase tracking-[0.16em] text-[#e1bd71]">
+        {hasCandidates ? "Possible matches" : "No reliable match"}
+      </span>
+      <h2 className="mt-3 text-[28px] font-semibold tracking-[-0.035em] text-white">
+        {hasCandidates ? "Closest card printings" : "This scan did not contain enough evidence"}
+      </h2>
       <p className="mt-2 max-w-[560px] text-[14px] leading-6 text-[#929dab]">{result.message ?? "Choose the exact printing, or take another photo with the collector number clearly visible."}</p>
 
-      <div className="mt-7 grid gap-3 sm:grid-cols-3">
+      {hasCandidates ? <div className="mt-7 grid gap-3 sm:grid-cols-3">
         {result.candidates.slice(0, 3).map(({ card, confidence }) => (
           <article
             key={card.id}
@@ -34,11 +39,11 @@ export function CandidateList({ result, onReset }: CandidateListProps) {
             ) : null}
           </article>
         ))}
-      </div>
+      </div> : null}
 
       <Button className="mt-6 w-full sm:w-auto" variant="secondary" onClick={onReset}>
         <RotateCcw aria-hidden="true" className="h-4 w-4" />
-        Take another photo
+        Scan another card
       </Button>
     </section>
   );

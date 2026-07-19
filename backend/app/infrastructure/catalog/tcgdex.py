@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -31,7 +32,8 @@ class TcgDexOptions:
     timeout_seconds: float = 25.0
     retries: int = 3
     concurrency: int = 12
-    page_size: int = 100
+    page_size: int = 1000
+    enrich_details: bool = False
 
 
 class TcgDexCatalogProvider:
@@ -46,6 +48,14 @@ class TcgDexCatalogProvider:
     async def cards(self, *, limit: int | None = None) -> AsyncIterator[dict[str, Any]]:
         """Yield full normalized cards while bounding outstanding detail requests."""
         briefs = await self._list_cards(limit=limit)
+        if not self.options.enrich_details:
+            sets = await self._list_sets()
+            for brief in briefs:
+                item = self._normalize_brief(brief, sets)
+                if item is not None:
+                    yield item
+            return
+
         timeout = httpx.Timeout(self.options.timeout_seconds)
         limits = httpx.Limits(max_connections=self.options.concurrency)
         semaphore = asyncio.Semaphore(self.options.concurrency)
@@ -94,6 +104,25 @@ class TcgDexCatalogProvider:
                     break
                 page += 1
         return cards[:limit] if limit is not None else cards
+
+    async def _list_sets(self) -> dict[str, dict[str, Any]]:
+        timeout = httpx.Timeout(self.options.timeout_seconds)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            payload = await self._get_json(
+                client,
+                f"{self.api_origin}/{self.options.language}/sets",
+                params={
+                    "pagination:page": 1,
+                    "pagination:itemsPerPage": 1000,
+                },
+            )
+        if not isinstance(payload, list):
+            return {}
+        return {
+            str(item["id"]): item
+            for item in payload
+            if isinstance(item, dict) and item.get("id")
+        }
 
     async def _get_json(
         self,
@@ -148,6 +177,47 @@ class TcgDexCatalogProvider:
             "marketplace_id": None,
             "marketplace_url": None,
             "price": price,
+        }
+
+    def _normalize_brief(
+        self,
+        card: dict[str, Any],
+        sets: dict[str, dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        """Normalize list-card data without one network request per printing."""
+        source_card_id = str(card.get("id", "")).strip()
+        local_id = str(card.get("localId", "")).strip()
+        image_base = card.get("image")
+        if not source_card_id or not local_id or not isinstance(image_base, str):
+            return None
+        image_parts = urlsplit(image_base).path.strip("/").split("/")
+        series_id = image_parts[-3] if len(image_parts) >= 3 else ""
+        if series_id.casefold() == "tcgp":
+            return None
+        set_id = image_parts[-2] if len(image_parts) >= 2 else source_card_id.rsplit("-", 1)[0]
+        set_data = sets.get(set_id, {})
+        raw_count = set_data.get("cardCount")
+        card_count = raw_count if isinstance(raw_count, dict) else {}
+        official_total = card_count.get("official")
+        normalized_number = normalize_collector_number(local_id) or local_id.upper()
+        name = str(card.get("name", "Unknown")).strip()
+        return {
+            "id": f"tcgdex:{self.options.language}:{set_id}:{source_card_id}",
+            "source": self.name,
+            "source_card_id": source_card_id,
+            "set_id": set_id,
+            "name": name,
+            "normalized_name": normalize_card_name(name),
+            "collector_number": local_id,
+            "normalized_collector_number": normalized_number,
+            "printed_total": str(official_total) if official_total is not None else None,
+            "set_name": str(set_data.get("name", set_id)).strip(),
+            "rarity": None,
+            "language": "English" if self.options.language == "en" else self.options.language,
+            "reference_image_url": f"{image_base}/high.webp",
+            "marketplace_id": None,
+            "marketplace_url": None,
+            "price": None,
         }
 
     @staticmethod

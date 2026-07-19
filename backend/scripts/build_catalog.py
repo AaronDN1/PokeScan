@@ -20,7 +20,7 @@ async def build_catalog(*, language: str, output: Path, limit: int | None) -> in
     cards.sort(key=lambda item: str(item["id"]))
     payload = {
         "schema_version": 2,
-        "generator_version": 2,
+        "generator_version": 3,
         "provider": provider.name,
         "language": language,
         "generated_at": datetime.now(UTC).isoformat(),

@@ -37,7 +37,7 @@ export function UploadPanel({ disabled = false, onSelect }: UploadPanelProps) {
           One photo. The right card.
         </h1>
         <p className="mt-3 max-w-[390px] text-pretty text-[14px] leading-6 text-[#929dab] sm:text-[15px]">
-          Center one card in good light. We’ll identify the exact printing and find its current market price.
+          Take a quick photo with one card roughly centered. We’ll handle ordinary rotation, perspective, and phone compression.
         </p>
 
         <div className="mt-7 grid w-full max-w-[390px] gap-3 sm:grid-cols-2">

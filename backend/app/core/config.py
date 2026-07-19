@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     )
     max_upload_bytes: int = 12 * 1024 * 1024
     max_image_pixels: int = 24_000_000
-    min_blur_variance: float = 34.0
+    min_blur_variance: float = 8.0
     recognition_rate_limit_per_minute: int = 30
     candidate_limit: int = 8
     auto_create_schema: bool = True
@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     )
     rapidocr_model_type: str = "tiny"
     name_crop: tuple[float, float, float, float] = (0.035, 0.025, 0.78, 0.155)
-    collector_crop: tuple[float, float, float, float] = (0.48, 0.82, 0.995, 0.985)
+    collector_crop: tuple[float, float, float, float] = (0.0, 0.88, 1.0, 0.995)
     artwork_crop: tuple[float, float, float, float] = (0.055, 0.135, 0.945, 0.675)
     name_ocr_model_path: Path = Path("models/ocr-name.onnx")
     number_ocr_model_path: Path = Path("models/ocr-number.onnx")

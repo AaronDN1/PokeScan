@@ -20,8 +20,8 @@ test("ships the focused scanner experience without starter metadata", async () =
   assert.match(scanner, /Scanner ready/);
   assert.match(scanner, /Scanner offline/);
   assert.match(scanner, /Scanner setup needed/);
-  assert.match(scanner, /mutation\.data\.status === "matched"/);
-  assert.match(scanner, /mutation\.data\.status !== "matched"/);
+  assert.match(scanner, /mutation\.data\.card \?/);
+  assert.match(scanner, /!mutation\.data\.card \?/);
   assert.match(scanner, /mutation\.isPending/);
   assert.match(scanner, /mutation\.isError/);
   assert.match(scanner, /disabled=\{!scannerReady\}/);

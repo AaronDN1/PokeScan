@@ -24,7 +24,7 @@ def _catalog_matches_request(path: Path, limit: int | None) -> bool:
         return False
     return (
         isinstance(payload, dict)
-        and payload.get("generator_version") == 2
+        and payload.get("generator_version") == 3
         and payload.get("requested_limit", "missing") == limit
     )
 

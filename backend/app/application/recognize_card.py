@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
+from collections.abc import Sequence
 from dataclasses import replace
 from time import perf_counter
 from uuid import uuid4
@@ -22,6 +24,7 @@ from app.application.normalization import (
 from app.domain.models import (
     ArtworkEvidence,
     CandidateEvidence,
+    Card,
     OrientationResult,
     Price,
     PricedCandidate,
@@ -35,6 +38,7 @@ from app.domain.ports import (
     ImageValidator,
     OrientationResolver,
     PriceProvider,
+    VisualCandidateFinder,
 )
 
 logger = structlog.get_logger()
@@ -50,6 +54,7 @@ class RecognizeCard:
         locator: CardLocator,
         orientation: OrientationResolver,
         cards: CardRepository,
+        visual_candidates: VisualCandidateFinder,
         artwork: ArtworkMatcher,
         prices: PriceProvider,
         confidence: WeightedConfidenceEngine,
@@ -59,6 +64,7 @@ class RecognizeCard:
         self._locator = locator
         self._orientation = orientation
         self._cards = cards
+        self._visual_candidates = visual_candidates
         self._artwork = artwork
         self._prices = prices
         self._confidence = confidence
@@ -99,18 +105,25 @@ class RecognizeCard:
         possible_numbers = collector_number_alternatives(number_reading.text)
 
         started = perf_counter()
-        candidates = await self._cards.search(
-            normalized_name=normalized_name,
-            collector_number=collector_number,
-            name_alternatives=possible_names,
-            collector_alternatives=possible_numbers,
-            limit=self._candidate_limit,
+        text_candidates, visual_candidates = await asyncio.gather(
+            self._cards.search(
+                normalized_name=normalized_name,
+                collector_number=collector_number,
+                name_alternatives=possible_names,
+                collector_alternatives=possible_numbers,
+                limit=self._candidate_limit,
+            ),
+            self._visual_candidates.search(
+                orientation.image.card_jpeg,
+                limit=self._candidate_limit,
+            ),
         )
+        candidates = self._merge_candidates(text_candidates, visual_candidates)
         timings["candidate_retrieval"] = self._elapsed(started)
 
         started = perf_counter()
         visual_scores = self._artwork.score_many(
-            orientation.image.artwork_region_jpeg, candidates
+            orientation.image.card_jpeg, candidates
         )
         timings["artwork_matching"] = self._elapsed(started)
 
@@ -164,7 +177,7 @@ class RecognizeCard:
         ]
         timings["price_lookup"] = self._elapsed(started)
         priced = tuple(priced_items)
-        selected = priced[0] if status is RecognitionStatus.MATCHED and priced else None
+        selected = priced[0] if status is not RecognitionStatus.UNRECOGNIZED and priced else None
         processing_ms = round((perf_counter() - total_started) * 1000, 2)
         timings["total"] = processing_ms
         diagnostics = (
@@ -182,6 +195,8 @@ class RecognizeCard:
             "recognition_timing",
             status=status.value,
             candidate_count=len(ranked),
+            normalized_name=normalized_name,
+            normalized_collector_number=collector_number,
             **{f"{key}_ms": value for key, value in timings.items()},
         )
         return RecognitionResult(
@@ -199,6 +214,30 @@ class RecognizeCard:
     @staticmethod
     def _elapsed(started: float) -> float:
         return round((perf_counter() - started) * 1000, 2)
+
+    def _merge_candidates(
+        self,
+        text_candidates: Sequence[Card],
+        visual_candidates: Sequence[Card],
+    ) -> list[Card]:
+        """Interleave independent retrieval paths so neither can crowd out the other."""
+        text_items = list(text_candidates)
+        visual_items = list(visual_candidates)
+        merged: list[Card] = []
+        seen: set[str] = set()
+        for index in range(max(len(text_items), len(visual_items))):
+            for source in (text_items, visual_items):
+                if index >= len(source):
+                    continue
+                card = source[index]
+                card_id = card.id
+                if card_id in seen:
+                    continue
+                seen.add(card_id)
+                merged.append(card)
+                if len(merged) >= self._candidate_limit:
+                    return merged
+        return merged
 
     @staticmethod
     def _diagnostics(
@@ -245,7 +284,7 @@ class RecognizeCard:
     @staticmethod
     def _message_for(status: RecognitionStatus) -> str | None:
         if status is RecognitionStatus.AMBIGUOUS:
-            return "We found close matches, but the evidence is not strong enough to choose safely."
+            return "This is the most likely printing; a few alternatives remained close."
         if status is RecognitionStatus.UNRECOGNIZED:
             return (
                 "We could not identify this card confidently. "

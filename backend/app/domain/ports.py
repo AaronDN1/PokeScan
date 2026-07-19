@@ -54,6 +54,7 @@ class OrientationResolver(Protocol):
         """Evaluate supported rotations and return one selected orientation."""
         ...
 
+
 class CardRepository(Protocol):
     """Search the local catalog without scanning every reference image."""
 
@@ -75,6 +76,18 @@ class CardRepository(Protocol):
 
     async def get(self, card_id: str) -> Card | None:
         """Return one catalog card by internal identifier."""
+        ...
+
+    async def get_many(self, card_ids: Sequence[str]) -> Sequence[Card]:
+        """Return a bounded ordered card sequence by stable internal IDs."""
+        ...
+
+
+class VisualCandidateFinder(Protocol):
+    """Shortlist catalog cards from one full-card visual query."""
+
+    async def search(self, card_jpeg: bytes, *, limit: int) -> Sequence[Card]:
+        """Return a bounded global visual shortlist without ORB-scanning the catalog."""
         ...
 
 

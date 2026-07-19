@@ -32,7 +32,11 @@
 }
 ```
 
-`ambiguous` sets `card` to null and exposes up to three honest candidates. `unrecognized` never chooses a random card. Image errors return 422, rate limiting 429, and missing OCR/catalog/model capability 503 with code `recognition_unavailable`.
+`ambiguous` returns the most likely card plus up to three honest candidates, allowing
+the UI to show a useful automatic result while clearly labeling the uncertainty.
+`unrecognized` leaves `card` null and never chooses a random card. Image errors
+return 422, rate limiting 429, and missing OCR/catalog/model capability 503 with
+code `recognition_unavailable`.
 
 `GET /api/v1/cards/{id}` and `GET /api/v1/prices/{id}` read local data. `POST /api/v1/feedback` stores identifiers/correction only, never the photo.
 

@@ -8,7 +8,8 @@
   },
   "scripts": {
     "setup": "node local-app.mjs --setup",
-    "setup:full": "node local-app.mjs --setup --full",
+    "setup:full": "node local-app.mjs --setup",
+    "setup:quick": "node local-app.mjs --setup --quick",
     "dev": "node local-app.mjs",
     "dev:web": "next dev --webpack -H 127.0.0.1 -p 5173",
     "dev:sites": "vinext dev",

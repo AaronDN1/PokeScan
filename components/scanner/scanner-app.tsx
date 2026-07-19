@@ -129,10 +129,10 @@ export function ScannerApp() {
         {mutation.isPending && previewUrl ? (
           <ScanProgress previewUrl={previewUrl} stage={stage} onCancel={reset} />
         ) : null}
-        {mutation.isSuccess && mutation.data.status === "matched" ? (
+        {mutation.isSuccess && mutation.data.card ? (
           <ResultCard result={mutation.data} onReset={reset} />
         ) : null}
-        {mutation.isSuccess && mutation.data.status !== "matched" ? (
+        {mutation.isSuccess && !mutation.data.card ? (
           <CandidateList result={mutation.data} onReset={reset} />
         ) : null}
         {mutation.isError ? <UploadPanel disabled={!scannerReady} onSelect={selectFile} /> : null}
@@ -161,7 +161,7 @@ export function ScannerApp() {
             {[
               ["01", "One card only", "Keep other cards out of frame."],
               ["02", "Use even light", "Avoid glare across the artwork."],
-              ["03", "Show the edges", "Leave a small border around the card."],
+              ["03", "Keep it in frame", "A little background around the card is enough."],
             ].map(([number, title, copy]) => (
               <div key={number} className="rounded-[14px] border border-white/[0.06] bg-white/[0.018] px-4 py-3.5">
                 <span className="font-mono text-[10px] text-[#5f6a78]">{number}</span>

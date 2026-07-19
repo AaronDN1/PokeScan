@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from functools import lru_cache
+from hashlib import sha256
 from pathlib import Path
+from typing import cast
 
 import cv2
 import numpy as np
@@ -32,8 +35,9 @@ class MobileNetV2Embedder:
 
     backend_name = "mobilenetv2_imagenet_onnx"
 
-    def __init__(self, model_path: Path) -> None:
+    def __init__(self, model_path: Path, *, intra_op_num_threads: int = 1) -> None:
         self.model_path = model_path
+        self._intra_op_num_threads = max(1, intra_op_num_threads)
         self._session: ort.InferenceSession | None = None
 
     @property
@@ -42,26 +46,40 @@ class MobileNetV2Embedder:
 
     def embed(self, image: ImageArray) -> tuple[float, ...] | None:
         """Return a normalized feature vector, or none when setup is incomplete."""
+        return self.embed_many((image,))[0]
+
+    def embed_many(
+        self,
+        images: Sequence[ImageArray],
+    ) -> list[tuple[float, ...] | None]:
+        """Use the model's dynamic batch dimension for fast offline preparation."""
+        if not images:
+            return []
         if not self.available:
-            return None
+            return [None] * len(images)
         if self._session is None:
             options = ort.SessionOptions()
-            options.intra_op_num_threads = 1
+            options.intra_op_num_threads = self._intra_op_num_threads
             self._session = ort.InferenceSession(
                 str(self.model_path),
                 sess_options=options,
                 providers=["CPUExecutionProvider"],
             )
         input_name = self._session.get_inputs()[0].name
+        inputs = np.concatenate([self._preprocess(image) for image in images], axis=0)
         output = np.asarray(
-            self._session.run(None, {input_name: self._preprocess(image)})[0],
+            self._session.run(None, {input_name: inputs})[0],
             dtype=np.float32,
-        ).reshape(-1)
-        norm = float(np.linalg.norm(output))
-        if norm <= 0:
-            return None
-        normalized = output / norm
-        return tuple(float(value) for value in normalized)
+        ).reshape(len(images), -1)
+        results: list[tuple[float, ...] | None] = []
+        for row in output:
+            norm = float(np.linalg.norm(row))
+            if norm <= 0:
+                results.append(None)
+                continue
+            normalized = row / norm
+            results.append(tuple(float(value) for value in normalized))
+        return results
 
     @staticmethod
     def _preprocess(image: ImageArray) -> FloatArray:
@@ -117,24 +135,42 @@ class CompositeArtworkMatcher:
 
     def __init__(self, model_path: Path) -> None:
         self.embedder = MobileNetV2Embedder(model_path)
+        self._feature_cache: dict[bytes, VisualFeatures] = {}
 
     @property
     def available(self) -> bool:
         return self.embedder.available
 
-    def score(self, artwork_jpeg: bytes, card: Card) -> float:
+    def score(self, card_jpeg: bytes, card: Card) -> float:
         """Retain the original single-candidate interface for replaceability."""
-        return self.score_many(artwork_jpeg, [card]).get(card.id, ArtworkEvidence()).combined_score
+        return self.score_many(card_jpeg, [card]).get(card.id, ArtworkEvidence()).combined_score
 
     def score_many(
-        self, artwork_jpeg: bytes, cards: Sequence[Card]
+        self, card_jpeg: bytes, cards: Sequence[Card]
     ) -> dict[str, ArtworkEvidence]:
         """Compute scan features once, then compare only with supplied candidates."""
-        observed = extract_visual_features(artwork_jpeg, self.embedder)
+        observed = self.features(card_jpeg)
         return {card.id: self._score_features(observed, card) for card in cards}
 
+    def features(self, card_jpeg: bytes) -> VisualFeatures:
+        """Cache one request's full-card features for shortlist and exact scoring."""
+        key = sha256(card_jpeg).digest()
+        cached = self._feature_cache.get(key)
+        if cached is not None:
+            return cached
+        features = extract_visual_features(card_jpeg, self.embedder)
+        if len(self._feature_cache) >= 8:
+            self._feature_cache.pop(next(iter(self._feature_cache)))
+        self._feature_cache[key] = features
+        return features
+
     @staticmethod
-    def _score_features(observed: VisualFeatures, card: Card) -> ArtworkEvidence:
+    @lru_cache(maxsize=2048)
+    def _reference_orb(reference_asset: str) -> bytes | None:
+        image = cast(ImageArray | None, cv2.imread(reference_asset, cv2.IMREAD_COLOR))
+        return orb_descriptors(image) if image is not None else None
+
+    def _score_features(self, observed: VisualFeatures, card: Card) -> ArtworkEvidence:
         components: list[tuple[float, float]] = []
         hash_score = 0.0
         if card.perceptual_hash:
@@ -147,10 +183,11 @@ class CompositeArtworkMatcher:
             except ValueError:
                 hash_score = 0.0
 
-        orb_score = CompositeArtworkMatcher._orb_score(
-            observed.orb_descriptors, card.orb_descriptors
-        )
-        if observed.orb_descriptors and card.orb_descriptors:
+        expected_orb = card.orb_descriptors
+        if expected_orb is None and card.reference_asset:
+            expected_orb = self._reference_orb(card.reference_asset)
+        orb_score = CompositeArtworkMatcher._orb_score(observed.orb_descriptors, expected_orb)
+        if observed.orb_descriptors and expected_orb:
             components.append((0.37, orb_score))
 
         embedding_score = CompositeArtworkMatcher._embedding_score(

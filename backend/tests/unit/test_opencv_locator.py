@@ -53,3 +53,19 @@ def test_still_rejects_an_image_without_a_card_shaped_subject() -> None:
 
     with pytest.raises(CardNotFoundError):
         OpenCvCardLocator(minimum_blur_variance=1).normalize(_encode(image))
+
+
+def test_candidate_quality_penalizes_a_corner_joined_to_the_image_frame() -> None:
+    image = np.zeros((825, 1100, 3), dtype=np.uint8)
+    stable = np.asarray(
+        [[754, 117], [796, 657], [306, 660], [323, 121]],
+        dtype=np.float32,
+    )
+    frame_joined = np.asarray(
+        [[740, 0], [797, 654], [307, 659], [325, 120]],
+        dtype=np.float32,
+    )
+
+    assert OpenCvCardLocator._candidate_quality(
+        stable, image
+    ) > OpenCvCardLocator._candidate_quality(frame_joined, image)

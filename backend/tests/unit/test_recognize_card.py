@@ -82,6 +82,13 @@ class Artwork:
         }
 
 
+class VisualCandidates:
+    async def search(self, card_jpeg: bytes, *, limit: int):
+        assert card_jpeg == b"image"
+        assert limit == 8
+        return [Cards.card]
+
+
 class Prices:
     async def get_price(self, card: Card) -> Price:
         return Price(42.5, source="fixture")
@@ -93,6 +100,7 @@ async def test_pipeline_returns_only_a_verified_high_confidence_match() -> None:
         locator=Locator(),
         orientation=Orientation(),
         cards=Cards(),
+        visual_candidates=VisualCandidates(),
         artwork=Artwork(),
         prices=Prices(),
         confidence=WeightedConfidenceEngine(),
@@ -103,3 +111,37 @@ async def test_pipeline_returns_only_a_verified_high_confidence_match() -> None:
     assert result.card.id == "sv-test-057"
     assert result.price.amount == 42.5
     assert result.confidence >= 0.82
+
+
+class EmptyCards(Cards):
+    async def search(self, **_kwargs):
+        return []
+
+
+class EmptyOrientation(Orientation):
+    def resolve(self, image: NormalizedCardImage) -> OrientationResult:
+        return OrientationResult(
+            image=image,
+            name=OcrReading("", 0.0),
+            collector_number=OcrReading("", 0.0),
+            score=0.0,
+        )
+
+
+async def test_pipeline_can_match_from_a_clear_global_visual_fallback() -> None:
+    use_case = RecognizeCard(
+        validator=Validator(),
+        locator=Locator(),
+        orientation=EmptyOrientation(),
+        cards=EmptyCards(),
+        visual_candidates=VisualCandidates(),
+        artwork=Artwork(),
+        prices=Prices(),
+        confidence=WeightedConfidenceEngine(),
+    )
+
+    result = await use_case.execute(payload=b"image", declared_mime="image/jpeg")
+
+    assert result.status is RecognitionStatus.MATCHED
+    assert result.card is not None
+    assert result.card.id == Cards.card.id

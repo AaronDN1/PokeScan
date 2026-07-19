@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
@@ -10,8 +11,8 @@ from app.application.confidence import WeightedConfidenceEngine
 from app.application.recognize_card import RecognizeCard
 from app.core.config import Settings
 from app.domain.errors import RecognitionUnavailableError
-from app.domain.models import OcrReading
-from app.domain.ports import ArtworkMatcher, OcrEngine
+from app.domain.models import Card, OcrReading
+from app.domain.ports import ArtworkMatcher, OcrEngine, VisualCandidateFinder
 from app.infrastructure.database.models import Base
 from app.infrastructure.database.repositories import (
     SqlAlchemyCardRepository,
@@ -26,6 +27,7 @@ from app.infrastructure.models.composite_artwork import CompositeArtworkMatcher
 from app.infrastructure.models.onnx_artwork import OnnxArtworkMatcher
 from app.infrastructure.models.onnx_ocr import OnnxCtcOcrEngine
 from app.infrastructure.models.paddle_ocr import PaddleOcrEngine
+from app.infrastructure.models.visual_index import CatalogVisualCandidateFinder
 from app.infrastructure.rate_limit import RecognitionRateLimiter
 
 
@@ -40,6 +42,14 @@ class _UnavailableOcrEngine:
 
     def read_collector_number(self, _region_jpeg: bytes) -> OcrReading:
         raise RecognitionUnavailableError(self._message)
+
+
+class _NoVisualCandidates:
+    """Disable global visual retrieval for custom matchers without shared features."""
+
+    async def search(self, _card_jpeg: bytes, *, limit: int) -> Sequence[Card]:
+        del limit
+        return ()
 
 
 class Container:
@@ -68,6 +78,15 @@ class Container:
         ocr, self.ocr_backend = self._build_ocr()
         artwork, self.artwork_backend = self._build_artwork()
         self.artwork = artwork
+        self.visual_candidates: VisualCandidateFinder
+        if isinstance(artwork, CompositeArtworkMatcher):
+            self.visual_candidates = CatalogVisualCandidateFinder(
+                self.sessions,
+                self.cards,
+                artwork,
+            )
+        else:
+            self.visual_candidates = _NoVisualCandidates()
         self.recognize_card = RecognizeCard(
             validator=PillowImageValidator(
                 max_bytes=settings.max_upload_bytes,
@@ -79,6 +98,7 @@ class Container:
             ),
             orientation=OcrOrientationResolver(ocr, crops),
             cards=self.cards,
+            visual_candidates=self.visual_candidates,
             artwork=artwork,
             prices=self.prices,
             confidence=WeightedConfidenceEngine(),
@@ -142,6 +162,8 @@ class Container:
                 await connection.run_sync(Base.metadata.create_all)
         try:
             self.catalog_count = await self.cards.count()
+            if isinstance(self.visual_candidates, CatalogVisualCandidateFinder):
+                await self.visual_candidates.start()
         except Exception:
             self.component_errors["database"] = "The catalog database is unavailable."
             self.catalog_count = 0

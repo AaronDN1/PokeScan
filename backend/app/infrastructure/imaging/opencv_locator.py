@@ -131,7 +131,11 @@ class OpenCvCardLocator:
     def _find_card_quadrilaterals(image: ImageArray) -> list[PointArray]:
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         lab = cast(ImageArray, cv2.cvtColor(image, cv2.COLOR_BGR2LAB))
-        edge_channels = (gray, lab[:, :, 1], lab[:, :, 2])
+        # A darker luminance pass suppresses JPEG-amplified background grain while
+        # retaining the long card border. It is especially useful for phone-sized
+        # compressed photos where the ordinary grayscale contour can join the frame.
+        dark_gray = cv2.convertScaleAbs(gray, alpha=0.70, beta=-8)
+        edge_channels = (gray, dark_gray, lab[:, :, 1], lab[:, :, 2])
         edges = np.zeros_like(gray)
         for channel in edge_channels:
             blurred = cv2.GaussianBlur(channel, (5, 5), 0)
@@ -175,17 +179,15 @@ class OpenCvCardLocator:
                     polygon_area = float(cv2.contourArea(points))
                     candidates.append((polygon_area, is_foreground_fallback, points))
                     break
-        largest_edge_area = max(
-            (area for area, is_fallback, _points in candidates if not is_fallback),
-            default=0.0,
+        # Compression and wood-grain backgrounds can join one card corner to the
+        # frame, producing a slightly larger but badly skewed edge contour. Rank
+        # by geometric stability and frame independence as well as raw area, and
+        # retain the independent foreground-mask candidates for comparison.
+        candidates.sort(
+            key=lambda item: item[0]
+            * OpenCvCardLocator._candidate_quality(item[2], image),
+            reverse=True,
         )
-        if largest_edge_area:
-            candidates = [
-                candidate
-                for candidate in candidates
-                if not candidate[1] or candidate[0] >= largest_edge_area * 1.75
-            ]
-        candidates.sort(key=lambda item: item[0], reverse=True)
         selected: list[PointArray] = []
         for _area, _is_fallback, candidate_points in candidates:
             if any(
@@ -241,6 +243,10 @@ class OpenCvCardLocator:
 
     @staticmethod
     def _touches_too_many_frame_sides(points: PointArray, image: ImageArray) -> bool:
+        return OpenCvCardLocator._frame_touch_count(points, image) >= 3
+
+    @staticmethod
+    def _frame_touch_count(points: PointArray, image: ImageArray) -> int:
         height, width = image.shape[:2]
         margin = max(3.0, min(width, height) * 0.006)
         touched_sides = {
@@ -256,7 +262,19 @@ class OpenCvCardLocator:
         # Morphological closing can expand a real card border into one or two
         # frame edges. Three or four touched sides is instead usually the image
         # boundary itself, which must never be treated as a detected card.
-        return len(touched_sides) >= 3
+        return len(touched_sides)
+
+    @staticmethod
+    def _candidate_quality(points: PointArray, image: ImageArray) -> float:
+        ordered = OpenCvCardLocator._order_points(points)
+        top = float(np.linalg.norm(ordered[1] - ordered[0]))
+        bottom = float(np.linalg.norm(ordered[2] - ordered[3]))
+        left = float(np.linalg.norm(ordered[3] - ordered[0]))
+        right = float(np.linalg.norm(ordered[2] - ordered[1]))
+        width_balance = min(top, bottom) / max(top, bottom, 1.0)
+        height_balance = min(left, right) / max(left, right, 1.0)
+        frame_penalty = 0.62 ** OpenCvCardLocator._frame_touch_count(points, image)
+        return width_balance * height_balance * frame_penalty
 
     @staticmethod
     def _same_subject(left: PointArray, right: PointArray) -> bool:

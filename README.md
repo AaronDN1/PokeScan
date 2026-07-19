@@ -34,12 +34,17 @@ npm.cmd install --global pnpm@11.9.0
 Node.js is installed under `C:\Program Files\nodejs`; it is not required to run this project.
 
 `pnpm.cmd setup` creates the Python environment, installs the recognition
-dependencies, downloads the pretrained models, and prepares a real 250-card
-starter catalog. Run it once. For the complete English catalog instead, use:
+dependencies, downloads the pretrained models, and prepares the complete
+physical English catalog. Run it once; the catalog/image preparation is the
+longest part of the first setup. For a fast developer smoke test only, use:
 
 ```powershell
-pnpm.cmd setup:full
+pnpm.cmd setup:quick
 ```
+
+The quick setup contains only 250 cards and is not suitable for judging real
+recognition coverage. `pnpm.cmd setup:full` remains an alias for the normal full
+setup.
 
 `pnpm.cmd dev` starts both the recognition API and the web app in one terminal.
 It reuses an already-healthy PokéLens API instead of failing when port 8000 is
@@ -63,7 +68,12 @@ python scripts/prepare_catalog_assets.py data/catalog-en.json
 python scripts/import_catalog.py data/catalog-en.json
 ```
 
-The builder uses TCGdex v2 structured data and its documented high-resolution WebP assets. IDs include source, language, set, and source card identity. Isolated missing metadata/images are recorded or skipped; recognition never downloads catalog images or calls a marketplace.
+The builder uses TCGdex v2 structured data and its documented WebP assets. It
+filters out digital TCG Pocket entries, uses compact reference images for local
+visual indexing, and preserves high-resolution URLs for display. IDs include
+source, language, set, and source card identity. Isolated missing metadata/images
+are recorded or skipped; recognition never downloads catalog images or calls a
+marketplace.
 
 ## Configuration
 
@@ -97,7 +107,7 @@ ruff check .
 mypy app
 pytest
 python scripts/smoke_recognition.py path/to/one-real-card-photo.jpg
-python scripts/benchmark_recognition.py --manifest benchmarks/manifest.json --output benchmarks/results.json
+python scripts/benchmark_recognition.py --manifest benchmarks/manifest.json --output benchmarks/results.json --stress
 ```
 
 Copy `backend/benchmarks/manifest.example.json` to `manifest.json`, place consented photographs in `backend/benchmarks/photos/`, and replace each expected ID with the imported TCGdex internal ID. No accuracy claim is made until a representative benchmark has been run.

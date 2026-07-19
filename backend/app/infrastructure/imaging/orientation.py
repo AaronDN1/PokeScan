@@ -31,7 +31,7 @@ class _RotationObservation:
 
 
 class OcrOrientationResolver:
-    """Evaluate four rotations using only the two targeted OCR regions."""
+    """Use an upright fast path and evaluate 180 degrees only when needed."""
 
     def __init__(self, ocr: OcrEngine, crops: RegionCrops | None = None) -> None:
         self._ocr = ocr
@@ -43,7 +43,9 @@ class OcrOrientationResolver:
         observations: list[_RotationObservation] = []
         name_ocr_ms = 0.0
         collector_ocr_ms = 0.0
-        for degrees in (0, 90, 180, 270):
+
+        def observe(degrees: int) -> _RotationObservation:
+            nonlocal name_ocr_ms
             rotated = rotate_card(card, degrees)
             name_crop = encode_jpeg(crop_relative(rotated, self._crops.name))
             collector_crop = encode_jpeg(crop_relative(rotated, self._crops.collector))
@@ -51,31 +53,34 @@ class OcrOrientationResolver:
             started = perf_counter()
             name = self._ocr.read_name(name_crop)
             name_ocr_ms += (perf_counter() - started) * 1000
-            observations.append(
-                _RotationObservation(
-                    degrees=degrees,
-                    card_jpeg=encode_jpeg(rotated),
-                    name_crop=name_crop,
-                    collector_crop=collector_crop,
-                    artwork_crop=artwork_crop,
-                    name=name,
-                    portrait=rotated.shape[0] >= rotated.shape[1],
-                )
+            observation = _RotationObservation(
+                degrees=degrees,
+                card_jpeg=encode_jpeg(rotated),
+                name_crop=name_crop,
+                collector_crop=collector_crop,
+                artwork_crop=artwork_crop,
+                name=name,
+                portrait=rotated.shape[0] >= rotated.shape[1],
             )
+            observations.append(observation)
+            return observation
 
-        likely = sorted(
+        first = observe(0)
+        first_score = self._score(first.name, OcrReading("", 0.0), portrait=True)
+        if first_score < 0.32:
+            observe(180)
+
+        selected = max(
             observations,
             key=lambda item: self._score(
-                item.name, OcrReading("", 0.0), portrait=item.portrait
+                item.name,
+                OcrReading("", 0.0),
+                portrait=item.portrait,
             ),
-            reverse=True,
-        )[:2]
-        for observation in likely:
-            started = perf_counter()
-            observation.collector = self._ocr.read_collector_number(
-                observation.collector_crop
-            )
-            collector_ocr_ms += (perf_counter() - started) * 1000
+        )
+        started = perf_counter()
+        selected.collector = self._ocr.read_collector_number(selected.collector_crop)
+        collector_ocr_ms += (perf_counter() - started) * 1000
         for observation in observations:
             observation.score = self._score(
                 observation.name,
@@ -83,7 +88,6 @@ class OcrOrientationResolver:
                 portrait=observation.portrait,
             )
 
-        selected = max(observations, key=lambda item: item.score)
         selected_card = decode_image(selected.card_jpeg)
         oriented = replace(
             image,

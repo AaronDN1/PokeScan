@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUpRight, CheckCircle2, RotateCcw, ShieldCheck } from "lucide-react";
+import { ArrowUpRight, CheckCircle2, RotateCcw, ScanSearch, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { RecognitionResponse } from "@/lib/contracts";
 import { formatCollectorNumber, formatUsd } from "@/lib/utils";
@@ -15,13 +15,15 @@ export function ResultCard({ result, onReset }: ResultCardProps) {
   if (!card) return null;
 
   const confidence = Math.round(result.confidence * 100);
+  const confirmed = result.status === "matched";
+  const StatusIcon = confirmed ? CheckCircle2 : ScanSearch;
 
   return (
     <section className="[animation:result-enter_360ms_ease-out]" aria-live="polite">
       <div className="mb-4 flex items-center justify-between px-1">
-        <div className="flex items-center gap-2 text-[13px] font-medium text-[#7ce0b0]">
-          <CheckCircle2 aria-hidden="true" className="h-4 w-4" />
-          Match confirmed
+        <div className={`flex items-center gap-2 text-[13px] font-medium ${confirmed ? "text-[#7ce0b0]" : "text-[#e1bd71]"}`}>
+          <StatusIcon aria-hidden="true" className="h-4 w-4" />
+          {confirmed ? "Match confirmed" : "Most likely match"}
         </div>
         <span className="text-[12px] text-[#778391]">{Math.round(result.processing_ms)} ms</span>
       </div>
@@ -90,7 +92,9 @@ export function ResultCard({ result, onReset }: ResultCardProps) {
 
             <p className="mt-5 flex items-center justify-center gap-1.5 text-[11px] text-[#697482]">
               <ShieldCheck aria-hidden="true" className="h-3.5 w-3.5" />
-              Text and artwork evidence independently checked
+              {confirmed
+                ? "Text and full-card visual evidence independently checked"
+                : "Best available result from text and full-card visual evidence"}
             </p>
           </div>
         </div>

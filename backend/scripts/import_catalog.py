@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
@@ -43,6 +44,8 @@ async def import_catalog(path: Path, *, database_url: str | None = None) -> int:
         await connection.run_sync(Base.metadata.create_all)
     async with sessions() as session:
         imported = 0
+        imported_ids: set[str] = set()
+        imported_scopes: set[tuple[str, str]] = set()
         for item in cards:
             if not isinstance(item, dict):
                 continue
@@ -72,6 +75,8 @@ async def import_catalog(path: Path, *, database_url: str | None = None) -> int:
             )
             await session.merge(record)
             imported += 1
+            imported_ids.add(str(item["id"]))
+            imported_scopes.add((str(item["source"]), str(item.get("language", "en"))))
             price = item.get("price")
             if isinstance(price, dict) and price.get("amount") is not None:
                 updated_at = (
@@ -88,6 +93,20 @@ async def import_catalog(path: Path, *, database_url: str | None = None) -> int:
                         updated_at=updated_at,
                     )
                 )
+        await session.flush()
+        scope_clauses = [
+            and_(CardRecord.source == source, CardRecord.language == language)
+            for source, language in imported_scopes
+        ]
+        if scope_clauses:
+            existing_ids = set(
+                await session.scalars(select(CardRecord.id).where(or_(*scope_clauses)))
+            )
+            stale_ids = sorted(existing_ids - imported_ids)
+            for offset in range(0, len(stale_ids), 500):
+                batch = stale_ids[offset : offset + 500]
+                await session.execute(delete(PriceRecord).where(PriceRecord.card_id.in_(batch)))
+                await session.execute(delete(CardRecord).where(CardRecord.id.in_(batch)))
         await session.commit()
     await engine.dispose()
     return imported

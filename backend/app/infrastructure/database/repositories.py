@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 import numpy as np
@@ -19,6 +21,8 @@ class SqlAlchemyCardRepository:
 
     def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
         self._sessions = sessions
+        self._normalized_names: tuple[str, ...] | None = None
+        self._name_index_lock = asyncio.Lock()
 
     async def search(
         self,
@@ -34,11 +38,13 @@ class SqlAlchemyCardRepository:
         numbers = tuple(
             dict.fromkeys(item for item in (collector_number, *collector_alternatives) if item)
         )
+        fuzzy_names = await self._fuzzy_names(names, limit=max(12, limit * 2))
+        searchable_names = tuple(dict.fromkeys((*names, *fuzzy_names)))
         clauses: list[ColumnElement[bool]] = []
         if numbers:
             clauses.append(CardRecord.normalized_collector_number.in_(numbers))
-        if names:
-            clauses.append(CardRecord.normalized_name.in_(names))
+        if searchable_names:
+            clauses.append(CardRecord.normalized_name.in_(searchable_names))
             searchable_tokens = sorted(
                 {
                     token
@@ -80,11 +86,44 @@ class SqlAlchemyCardRepository:
         cards.sort(key=relevance, reverse=True)
         return cards[:limit]
 
+    async def _fuzzy_names(self, observed: tuple[str, ...], *, limit: int) -> tuple[str, ...]:
+        if not observed:
+            return ()
+        if self._normalized_names is None:
+            async with self._name_index_lock:
+                if self._normalized_names is None:
+                    statement = select(CardRecord.normalized_name).distinct()
+                    async with self._sessions() as session:
+                        names = (await session.scalars(statement)).all()
+                    self._normalized_names = tuple(str(item) for item in names if item)
+        ranked = sorted(
+            (
+                (
+                    max(name_similarity(item, candidate) for item in observed),
+                    candidate,
+                )
+                for candidate in self._normalized_names
+            ),
+            reverse=True,
+        )
+        return tuple(candidate for score, candidate in ranked[:limit] if score >= 0.48)
+
     async def get(self, card_id: str) -> Card | None:
         """Return one internal card without exposing ORM objects."""
         async with self._sessions() as session:
             record = await session.get(CardRecord, card_id)
         return self._to_domain(record) if record else None
+
+    async def get_many(self, card_ids: Sequence[str]) -> list[Card]:
+        """Return cards in the caller's ranked ID order."""
+        ordered_ids = tuple(dict.fromkeys(card_ids))
+        if not ordered_ids:
+            return []
+        statement = select(CardRecord).where(CardRecord.id.in_(ordered_ids))
+        async with self._sessions() as session:
+            records = (await session.scalars(statement)).all()
+        by_id = {record.id: self._to_domain(record) for record in records}
+        return [by_id[card_id] for card_id in ordered_ids if card_id in by_id]
 
     async def count(self) -> int:
         """Return the current local catalog size."""

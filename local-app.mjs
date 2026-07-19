@@ -13,7 +13,7 @@ const venvPython = path.join(
 );
 const nextBin = path.join(root, "node_modules", "next", "dist", "bin", "next");
 const setupOnly = process.argv.includes("--setup");
-const fullCatalog = process.argv.includes("--full");
+const quickCatalog = process.argv.includes("--quick");
 const children = new Set();
 let stopping = false;
 
@@ -75,8 +75,8 @@ async function syncBackendDependencies(force = false) {
 async function bootstrap() {
   await syncBackendDependencies();
   const args = ["scripts/bootstrap_dev.py"];
-  if (!fullCatalog) args.push("--limit", "250");
-  console.log(fullCatalog ? "Preparing the complete English card catalog..." : "Preparing a 250-card starter catalog...");
+  if (quickCatalog) args.push("--limit", "250");
+  console.log(quickCatalog ? "Preparing a 250-card smoke-test catalog..." : "Preparing the complete English card catalog...");
   await run(venvPython, args, { cwd: backend });
 }
 
